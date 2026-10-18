@@ -1,0 +1,13 @@
+{
+  "name": "more-notes",
+  "version": "1.4.2",
+  "description": "Millennium plugin: private notes on people and games across Steam pages.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:release": "node scripts/build.mjs --release",
+    "test": "node scripts/build.mjs && node tests/frontend.test.mjs"
+  },
+  "license": "MIT"
+}
