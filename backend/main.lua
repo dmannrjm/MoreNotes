@@ -210,9 +210,9 @@ local function safe_path(p)
 end
 
 -- Appearance + backup settings.
-local DEFAULTS = { pill = true, side = "right", vertical = 50, shape = "pill", size = "medium", color = "#1a9fff", inline = false, backup = true, backupdir = "", iconcolor = "auto", libtab = true }
+local DEFAULTS = { pill = true, facing = "right", vertical = 50, shape = "pill", size = "medium", color = "#1a9fff", inline = false, backup = true, backupdir = "", iconcolor = "auto", libtab = false }
 local ENUMS = {
-  side = { left = true, right = true },
+  facing = { left = true, right = true, top = true, bottom = true, topleft = true, topright = true, bottomleft = true, bottomright = true },
   shape = { pill = true, circle = true, square = true, tab = true },
   size = { small = true, medium = true, large = true },
   iconcolor = { auto = true, light = true, dark = true },
@@ -240,6 +240,8 @@ local function apply_settings(a)
   for k, allowed in pairs(ENUMS) do
     if type(a[k]) == "string" and allowed[a[k]] then settings[k] = a[k] end
   end
+  -- older versions stored the edge as "side" (left or right)
+  if a.facing == nil and (a.side == "left" or a.side == "right") then settings.facing = a.side end
   local v = tonumber(a.vertical)
   if v then settings.vertical = math.max(0, math.min(100, math.floor(v + 0.5))) end
   if type(a.color) == "string" and a.color:match("^#%x%x%x%x%x%x$") then settings.color = a.color:lower() end

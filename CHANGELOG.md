@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+- "Side" is now **Facing** (with the control labelled **Direction**): left, right, top or bottom edge, or any of the four corners. On a top or bottom edge the offset slider runs left/right along the edge; corners ignore the offset.
+- Corner snap: in a corner, every shape except the dot bends to follow the corner (the pill becomes a quarter-round piece, the edge tab and the rounded square get a rounded inner corner); the dot stays a dot floating 6px in. The settings preview and the web pages draw the same shapes, and the note box opens inward from the corner.
+- Colour is now a short list of suggested colours (Steam blue, Green, Orange, Purple, Pink, Red, Grey). Choosing **Custom** opens a small panel with swatches, hue / saturation / lightness, a hex field and the icon colour.
+- The Notes tab on game pages is now **off by default** (the inline note line under titles was already off by default). Existing choices are kept.
+- The plugin description on the plugin panel is now just "Private Notes for Steam".
+- Older saved settings that stored `side` (left/right) are carried over as the facing.
+
 ## 1.4.2
 - Fix for `bad_key` when saving a note: the backend was not receiving the note's key. Notes sent their key, text and label as three separate arguments, while settings (which worked) already sent one packed string. Every call from the settings page and from the web-page script is now a single packed JSON string, and the backend accepts any way the host may hand arguments over (a table, one JSON string, a table with a `json` field, or separate positional values).
 - If `bad_key` ever appears again, it now says what the backend received (value types and lengths only, never note text).

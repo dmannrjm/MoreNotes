@@ -67,7 +67,7 @@ const stub = name => { const f = props => React.createElement('div', { ...props,
 
 // ---- fake backend (mirrors the Lua semantics we rely on) -------------------------------------
 const backendNotes = {};
-let backendSettings = { pill: true, side: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: true };
+let backendSettings = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false };
 let backupInfoReply = { ok: true, enabled: true, dir: 'C:/Users/me/Documents/MoreNotes Backup', saved_at: 1760700000, count: 3, error: '', restored_from: '', default_dir: 'C:/Users/me/Documents/MoreNotes Backup' };
 let restoreReply = { ok: true, count: 2, from: 'x' };
 let acceptDir = true;
@@ -132,6 +132,7 @@ const tick = () => new Promise(r => setTimeout(r, 20));
 await tick();
 
 // ---- tests -------------------------------------------------------------------------------------
+const assertSame = (a, b, msg) => assert.equal(JSON.stringify(a), JSON.stringify(b), msg);
 let passed = 0;
 const test = async (name, fn) => { await fn(); passed++; console.log('ok  -', name); };
 
@@ -259,7 +260,7 @@ await test('note editor shows "current / maximum" beneath the writing area and c
   assert.match(counterText(t), /\d+ \/ 4000/);
   // the counter sits after the text field in the layout
   const kinds = findAll(t, n => n.host === 'TextField' || n.host === 'NoteCounter').map(n => n.host);
-  assert.deepEqual(kinds, ['TextField', 'NoteCounter']);
+  assertSame(kinds, ['TextField', 'NoteCounter']);
   field().props.onChange({ target: { value: 'héllo' } }); t = render();
   assert.match(counterText(t), /5 \/ 4000/);
   assert.equal(counterNode(t).kids.props.style.color, undefined, 'plain colour when far from the limit');
@@ -304,24 +305,31 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
 await test('settings section lists the tab options with defaults from the backend', () => {
   const t = textOf(tree);
-  for (const l of ['Note tab', 'Show the tab', 'Side', 'Up/down offset \\(all tabs\\)', 'Final location', 'Shape', 'Size', 'Colours', 'Swatches', 'Hue', 'Saturation', 'Lightness', 'Icon colour', 'Notes tab on game pages']) assert.match(t, new RegExp(l));
-  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 4); // offset + hue + saturation + lightness
-  const dd = findAll(labelRow('Side'), n => n.host === 'Dropdown')[0];
+  for (const l of ['Note tab', 'Show the tab', 'Facing', 'Up/down offset \\(all tabs\\)', 'Final location', 'Shape', 'Size', 'Colour', 'Notes tab on game pages']) assert.match(t, new RegExp(l));
+  assert.doesNotMatch(t, /Swatches|Custom colour/, 'the custom colour panel stays hidden for a suggested colour');
+  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 1); // only the offset until Custom is chosen
+  assert.doesNotMatch(t, /\|Side\|/, 'the old Side row is gone');
+  const facing = labelRow('Facing');
+  assert.equal(facing.props.description, 'Direction');
+  const dd = findAll(facing, n => n.host === 'Dropdown')[0];
   assert.equal(dd.props.strDefaultLabel, 'Right edge');
+  assertSame(dd.props.rgOptions.map(o => o.label), ['Left edge', 'Right edge', 'Top edge', 'Bottom edge', 'Top-left corner', 'Top-right corner', 'Bottom-left corner', 'Bottom-right corner']);
+  assert.equal(findAll(labelRow('Notes tab on game pages'), n => n.host === 'Toggle')[0].props.value, false, 'the library Notes tab is off by default');
+  assert.equal(findAll(labelRow('Also show a note line under titles'), n => n.host === 'Toggle')[0].props.value, false, 'the inline note line is off by default');
 });
 
-await test('side, shape and size dropdowns update locally at once and write after a pause', async () => {
+await test('facing, shape and size dropdowns update locally at once and write after a pause', async () => {
   const before = settingsCalls().length;
-  findAll(labelRow('Side'), n => n.host === 'Dropdown')[0].props.onChange({ data: 0 }); rerender();
+  findAll(labelRow('Facing'), n => n.host === 'Dropdown')[0].props.onChange({ data: 0 }); rerender();
   findAll(labelRow('Shape'), n => n.host === 'Dropdown')[0].props.onChange({ data: 1 }); rerender();
   findAll(labelRow('Size'), n => n.host === 'Dropdown')[0].props.onChange({ data: 2 }); rerender();
-  assert.equal(window.__moreNotes.store.settings.side, 'left');
+  assert.equal(window.__moreNotes.store.settings.facing, 'left');
   assert.equal(window.__moreNotes.store.settings.shape, 'circle');
   assert.equal(window.__moreNotes.store.settings.size, 'large');
   assert.equal(settingsCalls().length, before, 'must debounce');
   await wait(450);
   assert.equal(settingsCalls().length, before + 1, 'three quick changes become one write');
-  assert.equal(backendSettings.side, 'left');
+  assert.equal(backendSettings.facing, 'left');
   assert.equal(backendSettings.shape, 'circle');
   assert.equal(backendSettings.size, 'large');
 });
@@ -341,10 +349,10 @@ await test('offset slider is centred on 0, writes once, and moves the tab (negat
   assert.equal(offset().props.value, -33);
 });
 
-await test('the final-location preview copies the icon on the chosen side and offset', () => {
+await test('the final-location preview copies the icon on the chosen edge and offset', () => {
   const prev = findAll(tree, n => n.host === 'PlacementPreview')[0];
   assert.ok(prev);
-  assert.equal(prev.props.st.side, 'left'); // set by the dropdown test above
+  assert.equal(prev.props.st.facing, 'left'); // set by the dropdown test above
   assert.equal(prev.props.st.vertical, 17);
   const icons = findAll(prev, n => n.host === 'TabIcon');
   assert.equal(icons.length, 1);
@@ -355,14 +363,83 @@ await test('the final-location preview copies the icon on the chosen side and of
   assert.ok(wrapper, 'wrapper at 17%');
   assert.equal(wrapper.props.style.left, 6);
   assert.equal(wrapper.props.style.right, undefined);
-  // an icon is also shown beside the colour controls
-  assert.ok(findAll(tree, n => n.host === 'TabIcon').length >= 2);
 });
 
-await test('colour panel: swatches, hue/saturation/lightness sliders, hex field and icon colour', async () => {
+const previewIcon = () => { const prev = findAll(tree, n => n.host === 'PlacementPreview')[0]; return { prev, icon: findAll(prev, n => n.host === 'TabIcon')[0] }; };
+const iconStyle = () => previewIcon().icon.kids.props.style;
+const wrapperStyle = () => findAll(previewIcon().prev, n => n.host === 'div' && n.props.style && n.props.style.position === 'absolute' && n.props.style.transform !== 'translate(-50%, -50%)' )[0].props.style;
+const setLook = patch => { window.__moreNotes.store.saveSettings(patch); rerender(); };
+
+await test('top and bottom edges: the offset runs left/right and the preview docks to that edge', () => {
+  setLook({ facing: 'top' });
+  assert.ok(labelRow('Facing') && sliderByLabel('Left/right offset (all tabs)'), 'slider is relabelled for a horizontal edge');
+  assert.equal(sliderByLabel('Up/down offset (all tabs)'), undefined);
+  assert.equal(sliderByLabel('Left/right offset (all tabs)').props.value, -33);
+  const w = wrapperStyle();
+  assert.equal(w.left, '17%'); assert.equal(w.top, 6); assert.equal(w.transform, 'translateX(-50%)');
+  setLook({ facing: 'bottom', shape: 'tab' });
+  const w2 = wrapperStyle();
+  assert.equal(w2.bottom, 0, 'a tab is flush with its edge');
+  const t = 12 * 0.7;
+  assert.equal(iconStyle().borderRadius, `${t}px ${t}px 0 0`, 'rounded away from the bottom edge');
+  assert.equal(iconStyle().width, 124 * 0.7, 'a tab lies flat on a horizontal edge (large size)');
+  setLook({ facing: 'left', shape: 'circle' });
+});
+
+await test('corners ignore the offset; the dot floats, every other shape bends to follow the corner', () => {
+  setLook({ facing: 'bottomright', shape: 'pill', size: 'medium' });
+  assert.equal(sliderByLabel('Up/down offset (all tabs)'), undefined);
+  assert.equal(sliderByLabel('Left/right offset (all tabs)'), undefined);
+  assert.equal(labelRow('Offset (all tabs)').props.description, 'Corners ignore the offset.');
+  assert.equal(iconStyle().borderRadius, '100% 0 0 0', 'bent pill: only the inner corner is rounded');
+  assert.equal(iconStyle().width, 68 * 0.7);
+  assert.equal(iconStyle().height, 68 * 0.7);
+  assertSame([wrapperStyle().bottom, wrapperStyle().right], [0, 0], 'flush in the corner');
+  const expected = { topleft: '0 0 100% 0', topright: '0 0 0 100%', bottomleft: '0 100% 0 0', bottomright: '100% 0 0 0' };
+  for (const f of Object.keys(expected)) { setLook({ facing: f, shape: 'pill' }); assert.equal(iconStyle().borderRadius, expected[f], f + ' pill'); }
+  setLook({ facing: 'topleft', shape: 'tab' }); assert.equal(iconStyle().borderRadius, `0 0 ${18 * 0.7}px 0`);
+  setLook({ facing: 'topleft', shape: 'square' }); assert.equal(iconStyle().borderRadius, `0 0 ${12 * 0.7}px 0`);
+  setLook({ facing: 'topright', shape: 'circle' });
+  assert.equal(iconStyle().borderRadius, '50%', 'the dot is not bent');
+  assert.equal(iconStyle().width, 48 * 0.7);
+  assertSame([wrapperStyle().top, wrapperStyle().right], [6, 6], 'the dot floats 6px in from the corner');
+  setLook({ facing: 'left', shape: 'circle' });
+  assert.ok(sliderByLabel('Up/down offset (all tabs)'), 'the offset slider returns for an edge');
+});
+
+await test('an older saved side is understood as the facing', async () => {
+  backendSettings = { ...backendSettings, facing: undefined, side: 'right' };
+  delete backendSettings.facing;
+  await window.__moreNotes.store.load(); rerender();
+  assert.equal(window.__moreNotes.store.settings.facing, 'right');
+  backendSettings = { ...backendSettings, facing: 'left' }; delete backendSettings.side;
+  await window.__moreNotes.store.load(); rerender();
+  assert.equal(window.__moreNotes.store.settings.facing, 'left');
+  assert.equal(window.__moreNotes.store.settings.vertical, 17, 'offset survives a reload');
+});
+
+await test('colour is a short list of suggested colours; the custom panel appears only for Custom', async () => {
   const st = () => window.__moreNotes.store.settings;
-  findAll(tree, n => n.host === 'Focusable' && n.props.title === '#e0589b')[0].props.onClick(); rerender();
+  const colourDd = () => findAll(labelRow('Colour'), n => n.host === 'Dropdown')[0];
+  assertSame(colourDd().props.rgOptions.map(o => o.label), ['Steam blue', 'Green', 'Orange', 'Purple', 'Pink', 'Red', 'Grey', 'Custom']);
+  assert.equal(colourDd().props.strDefaultLabel, 'Steam blue');
+  colourDd().props.onChange({ data: 4 }); rerender();           // Pink
   assert.equal(st().color, '#e0589b');
+  assert.equal(colourDd().props.strDefaultLabel, 'Pink');
+  assert.doesNotMatch(textOf(tree), /Swatches|Custom colour|Icon colour/, 'no panel for a suggested colour');
+  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 1);
+  colourDd().props.onChange({ data: 7 }); rerender();           // Custom
+  assert.equal(colourDd().props.strDefaultLabel, 'Custom');
+  assert.equal(st().color, '#e0589b', 'choosing Custom keeps the current colour');
+  assert.match(textOf(tree), /Custom colour/);
+  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 4, 'offset + hue + saturation + lightness');
+  assert.ok(findAll(tree, n => n.host === 'TabIcon').length >= 2, 'a small preview icon sits in the custom panel');
+});
+
+await test('custom colour panel: swatches, hue/saturation/lightness, hex field and icon colour', async () => {
+  const st = () => window.__moreNotes.store.settings;
+  findAll(tree, n => n.host === 'Focusable' && n.props.title === '#2fbf71')[0].props.onClick(); rerender();
+  assert.equal(st().color, '#2fbf71');
   sliderByLabel('Hue').props.onChange(200); rerender();
   assert.match(st().color, /^#[0-9a-f]{6}$/);
   assert.ok(Math.abs(hueOf(st().color) - 200) <= 2, 'hue follows the slider: ' + st().color);
@@ -376,13 +453,20 @@ await test('colour panel: swatches, hue/saturation/lightness sliders, hex field 
   hex().props.onChange({ target: { value: 'zz' } }); rerender();
   assert.equal(st().color, '#ff8800');
   assert.match(textOf(tree), /six hex digits/);
-  const swatch = findAll(tree, n => n.host === 'Focusable' && n.props.title === '#ffffff')[0];
-  assert.ok(swatch);
+  assert.ok(findAll(tree, n => n.host === 'Focusable' && n.props.title === '#ffffff')[0]);
   findAll(labelRow('Icon colour'), n => n.host === 'Dropdown')[0].props.onChange({ data: 1 }); rerender();
   assert.equal(st().iconcolor, 'light');
   await wait(450);
   assert.equal(backendSettings.color, '#ff8800');
   assert.equal(backendSettings.iconcolor, 'light');
+});
+
+await test('choosing a suggested colour again closes the custom panel', () => {
+  const colourDd = () => findAll(labelRow('Colour'), n => n.host === 'Dropdown')[0];
+  colourDd().props.onChange({ data: 0 }); rerender();           // Steam blue
+  assert.equal(window.__moreNotes.store.settings.color, '#1a9fff');
+  assert.doesNotMatch(textOf(tree), /Swatches|Custom colour|Icon colour/);
+  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 1);
 });
 
 await test('pill and inline toggles write through', async () => {
@@ -391,11 +475,9 @@ await test('pill and inline toggles write through', async () => {
   await wait(450);
   assert.equal(backendSettings.pill, false);
   assert.equal(backendSettings.inline, true);
-  findAll(labelRow('Notes tab on game pages'), n => n.host === 'Toggle')[0].props.onChange(false); rerender();
-  await wait(450);
-  assert.equal(backendSettings.libtab, false);
   findAll(labelRow('Notes tab on game pages'), n => n.host === 'Toggle')[0].props.onChange(true); rerender();
   await wait(450);
+  assert.equal(backendSettings.libtab, true); // switched on for the library tab tests below
 });
 
 await test('backup section lists the toggle, folder, status and actions', () => {
@@ -485,15 +567,15 @@ await test('only plain strings are ever sent to the backend', () => {
 });
 
 await test('invalid values from the backend are ignored on load', async () => {
-  backendSettings = { pill: 'yes', side: 'top', vertical: 'abc', shape: 'star', size: 'huge', color: 'red', inline: 1, iconcolor: 'rainbow', libtab: 'no' };
+  backendSettings = { pill: 'yes', facing: 'sideways', side: 'top', vertical: 'abc', shape: 'star', size: 'huge', color: 'red', inline: 1, iconcolor: 'rainbow', libtab: 'no' };
   await window.__moreNotes.store.load();
   const st = window.__moreNotes.store.settings;
-  assert.equal(JSON.stringify(st), JSON.stringify({ pill: true, side: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: true }));
+  assert.equal(JSON.stringify(st), JSON.stringify({ pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false }));
 });
 
 await test('settings write failure shows a message', async () => {
   backendDown = true;
-  window.__moreNotes.store.saveSettings({ side: 'left' });
+  window.__moreNotes.store.saveSettings({ facing: 'left' });
   await wait(450);
   rerender();
   assert.match(textOf(tree), /Could not save appearance/);
@@ -505,6 +587,7 @@ const tabProps = (extra = {}) => ({ tabs: [{ id: 'achievements', content: { prop
 
 await test('library page: a native Notes tab is added next to the others, once', () => {
   assert.equal(patched.length, 2, 'jsx runtime is patched at start-up');
+  window.__moreNotes.store.saveSettings({ libtab: true }); // it is off by default; the tests below need it on
   const props = tabProps();
   jsxCall(props); jsxCall(props); jsxCall(props);
   assert.equal(props.tabs.length, 2);

@@ -10,7 +10,7 @@ script = (root / '.millennium' / 'Dist' / 'webkit.js').read_text()
 store_notes = {}
 calls = []
 # legacy inline-chip tests run first with the pill off; pill tests switch the settings later
-settings = {'pill': False, 'side': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': True, 'iconcolor': 'auto'}
+settings = {'pill': False, 'facing': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': True, 'iconcolor': 'auto'}
 
 bad_args = []
 
@@ -145,7 +145,7 @@ with sync_playwright() as p:
 
     # ------------------------------------------------------------------ pill
     store_notes.clear()
-    settings.update({'pill': True, 'inline': False, 'side': 'right', 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'vertical': 50})
+    settings.update({'pill': True, 'inline': False, 'facing': 'right', 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'vertical': 50})
     pg = ctx.new_page()
     pg.set_viewport_size({'width': 1280, 'height': 800})
     pg.goto('https://store.steampowered.com/app/620/Portal_2/')
@@ -191,9 +191,9 @@ with sync_playwright() as p:
     check('Delete removes the note', 'app:620' not in store_notes)
 
     # settings: left edge, circle, custom colour, top-ish; applied when the page regains focus
-    settings.update({'side': 'left', 'shape': 'circle', 'color': '#e0589b', 'vertical': 20, 'size': 'large'})
+    settings.update({'facing': 'left', 'shape': 'circle', 'color': '#e0589b', 'vertical': 20, 'size': 'large'})
     pg.evaluate("window.dispatchEvent(new Event('focus'))")
-    pg.wait_for_function("document.querySelector('#morenotes-pill').shadowRoot.querySelector('.wrap').dataset.side==='left'")
+    pg.wait_for_function("document.querySelector('#morenotes-pill').shadowRoot.querySelector('.wrap').dataset.facing==='left'")
     box = pg.locator('#morenotes-pill .handle').bounding_box()
     check('pill moves to the left edge', box['x'] < 12)
     check('pill height follows the vertical setting', abs((box['y'] + box['height'] / 2) - 160) < 4)
@@ -218,11 +218,77 @@ with sync_playwright() as p:
     pg.keyboard.press('Escape')
 
     for shape in ('square', 'tab'):
-        settings.update({'shape': shape, 'side': 'right', 'vertical': 60, 'size': 'medium', 'color': '#5ba32b'})
+        settings.update({'shape': shape, 'facing': 'right', 'vertical': 60, 'size': 'medium', 'color': '#5ba32b'})
         pg.evaluate("window.dispatchEvent(new Event('focus'))")
         pg.wait_for_function("document.querySelector('#morenotes-pill').shadowRoot.querySelector('.wrap').dataset.shape==='%s'" % shape)
         pg.screenshot(path='/tmp/pill_%s.png' % shape)
         check('%s shape renders' % shape, pg.locator('#morenotes-pill .handle').is_visible())
+
+
+    # ------------------------------------------------------------------ facing: edges and corners
+    WRAP = "document.querySelector('#morenotes-pill').shadowRoot.querySelector('.wrap')"
+    def look(**kw):
+        settings.update(kw)
+        pg.evaluate("window.dispatchEvent(new Event('focus'))")
+        pg.wait_for_function("(()=>{const w=%s;return w.dataset.facing==='%s'&&w.dataset.shape==='%s'})()" % (WRAP, settings['facing'], settings['shape']))
+        pg.wait_for_timeout(60)
+    handle = lambda: pg.locator('#morenotes-pill .handle').bounding_box()
+    radius = lambda corner: pg.evaluate("getComputedStyle(document.querySelector('#morenotes-pill').shadowRoot.querySelector('.handle')).%s" % corner)
+    near = lambda a, b, tol=2: abs(a - b) <= tol
+    base = dict(shape='pill', size='medium', vertical=50, color='#1a9fff', iconcolor='auto')
+
+    look(facing='top', **base); b = handle()
+    check('top edge: the pill lies flat (wide, short), centred, 6px from the top', near(b['width'], 104) and near(b['height'], 32) and near(b['x'] + b['width'] / 2, 640) and near(b['y'], 6))
+    check('top edge: the label reads horizontally', pg.evaluate("getComputedStyle(document.querySelector('#morenotes-pill').shadowRoot.querySelector('.lbl')).writingMode") == 'horizontal-tb')
+    pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box()
+    check('top edge: the box opens below the handle', pb['y'] > b['y'] + b['height'] and pb['x'] >= 0 and pb['x'] + pb['width'] <= 1280)
+    pg.keyboard.press('Escape')
+    look(facing='bottom', **base); b = handle()
+    check('bottom edge: 6px above the bottom, centred', near(b['y'] + b['height'], 794) and near(b['x'] + b['width'] / 2, 640))
+    pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box()
+    check('bottom edge: the box opens above the handle', pb['y'] + pb['height'] < b['y'])
+    pg.keyboard.press('Escape')
+    look(facing='top', **{**base, 'vertical': 20}); b = handle()
+    check('top edge: the offset moves the tab along the edge (20% of the width)', near(b['x'] + b['width'] / 2, 256))
+    look(facing='top', **{**base, 'vertical': 0}); b = handle()
+    pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
+    check('top edge: the offset is held within 8%-92% and the box stays on screen', near(b['x'] + b['width'] / 2, 102.4) and pb['x'] >= 0)
+    look(facing='bottom', **{**base, 'vertical': 100}); pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
+    check('bottom edge at the far end keeps the box on screen', pb['x'] + pb['width'] <= 1280 and pb['x'] >= 0)
+    look(facing='top', **{**base, 'shape': 'tab'}); b = handle()
+    check('top edge tab is flush with the edge and rounded away from it', near(b['y'], 0) and near(b['width'], 104) and near(b['height'], 26) and radius('borderBottomLeftRadius') == '12px' and radius('borderTopLeftRadius') == '0px')
+    look(facing='bottom', **{**base, 'shape': 'tab'}); b = handle()
+    check('bottom edge tab is flush with the bottom', near(b['y'] + b['height'], 800) and radius('borderTopLeftRadius') == '12px' and radius('borderBottomLeftRadius') == '0px')
+
+    corners = {'topleft': ('borderBottomRightRadius', lambda b: near(b['x'], 0) and near(b['y'], 0)),
+               'topright': ('borderBottomLeftRadius', lambda b: near(b['x'] + b['width'], 1280) and near(b['y'], 0)),
+               'bottomleft': ('borderTopRightRadius', lambda b: near(b['x'], 0) and near(b['y'] + b['height'], 800)),
+               'bottomright': ('borderTopLeftRadius', lambda b: near(b['x'] + b['width'], 1280) and near(b['y'] + b['height'], 800))}
+    all_radii = ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius']
+    for f, (inner, flush) in corners.items():
+        for shape, expect in (('pill', ['68px', '100%']), ('tab', ['18px']), ('square', ['12px'])):
+            look(facing=f, **{**base, 'shape': shape}); b = handle()
+            others = [radius(c) for c in all_radii if c != inner]
+            check('%s %s: bent piece fills the corner (68px) flush with both edges' % (f, shape), near(b['width'], 68) and near(b['height'], 68) and flush(b))
+            check('%s %s: only the inner corner is rounded (%s)' % (f, shape, expect[0]), radius(inner) in expect and all(o == '0px' for o in others))
+        look(facing=f, **{**base, 'shape': 'circle'}); b = handle()
+        check('%s: the dot stays a dot, floating 6px in' % f, near(b['width'], 48) and near(b['height'], 48) and radius('borderTopLeftRadius') in ('50%', '24px') and not flush(b) and (near(b['x'], 6) or near(b['x'] + b['width'], 1274)))
+    look(facing='topleft', **base); a1 = handle()
+    look(facing='topleft', **{**base, 'vertical': 90}); a2 = handle()
+    check('corners ignore the offset', near(a1['x'], a2['x']) and near(a1['y'], a2['y']))
+    check('corner pieces show only the icon (no label)', pg.evaluate("getComputedStyle(document.querySelector('#morenotes-pill').shadowRoot.querySelector('.lbl')).display") == 'none')
+    look(facing='topleft', **base); hb = handle(); pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
+    check('top-left corner: the box opens below, inside the page', pb['y'] > hb['y'] + hb['height'] and pb['x'] >= 0)
+    look(facing='bottomright', **base); hb = handle(); pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
+    check('bottom-right corner: the box opens above, inside the page', pb['y'] + pb['height'] < hb['y'] and pb['x'] + pb['width'] <= 1280)
+    look(facing='topright', **base); pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
+    check('top-right corner: the box is right-aligned inside the page', pb['x'] + pb['width'] <= 1280 and pb['x'] >= 0)
+    look(facing='bottomleft', **{**base, 'size': 'large'}); b = handle()
+    check('large corner pieces are 80px', near(b['width'], 80) and near(b['height'], 80))
+    pg.screenshot(path='/tmp/pill_corner_bl.png')
+    look(facing='topright', **{**base, 'color': '#e0589b'}); pg.screenshot(path='/tmp/pill_corner_tr.png')
+    look(facing='top', **base); pg.screenshot(path='/tmp/pill_top.png')
+    look(facing='right', **base)
 
     # inline setting on/off
     settings.update({'inline': True})

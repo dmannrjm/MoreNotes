@@ -19,16 +19,17 @@
     el.className = el.className.replace(/\s*\b(warn|full)\b/g, '') + (n >= MAX_NOTE ? ' full' : n >= MAX_NOTE * 0.9 ? ' warn' : '');
   }
 
-  var DEFAULTS = { pill: true, side: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, iconcolor: 'auto' };
+  var DEFAULTS = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, iconcolor: 'auto' };
   var settings = {};
   Object.keys(DEFAULTS).forEach(function (k) { settings[k] = DEFAULTS[k]; });
-  var ENUMS = { side: ['left', 'right'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
+  var ENUMS = { facing: ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
 
   function applySettings(a) {
     if (!a || typeof a !== 'object') return;
     if (typeof a.pill === 'boolean') settings.pill = a.pill;
     if (typeof a.inline === 'boolean') settings.inline = a.inline;
     Object.keys(ENUMS).forEach(function (k) { if (ENUMS[k].indexOf(a[k]) >= 0) settings[k] = a[k]; });
+    if (a.facing === undefined && (a.side === 'left' || a.side === 'right')) settings.facing = a.side; // older versions
     var v = Number(a.vertical);
     if (isFinite(v)) settings.vertical = Math.max(0, Math.min(100, Math.round(v)));
     if (typeof a.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(a.color)) settings.color = a.color.toLowerCase();
@@ -258,24 +259,55 @@
   // Lives in a shadow root so page CSS cannot restyle it.
   var pill = null;
   var ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4"/><path d="M8 12h8M8 16h6"/></svg>';
-  var SIZES = { small: { w: 26, h: 84, d: 40, tw: 22 }, medium: { w: 32, h: 104, d: 48, tw: 26 }, large: { w: 38, h: 124, d: 56, tw: 30 } };
+  var SIZES = { small: { w: 26, h: 84, d: 40, tw: 22, c: 56 }, medium: { w: 32, h: 104, d: 48, tw: 26, c: 68 }, large: { w: 38, h: 124, d: 56, tw: 30, c: 80 } };
   var PILL_CSS = [
     ':host{all:initial}',
-    '.wrap{position:fixed;top:var(--top);transform:translateY(-50%);z-index:2147483000;display:flex;align-items:center;font:12px/1.4 "Motiva Sans",Arial,Helvetica,sans-serif;color:#c6d4df}',
-    '.wrap[data-side=right]{right:0;flex-direction:row-reverse}',
-    '.wrap[data-side=left]{left:0;flex-direction:row}',
+    '.wrap{position:fixed;z-index:2147483000;font:12px/1.4 "Motiva Sans",Arial,Helvetica,sans-serif;color:#c6d4df}',
+    // left / right edges: the box opens beside the handle
+    '.wrap[data-edge=v]{display:flex;align-items:center;top:var(--pos);transform:translateY(-50%)}',
+    '.wrap[data-facing=right]{right:0;flex-direction:row-reverse}',
+    '.wrap[data-facing=left]{left:0;flex-direction:row}',
+    // top / bottom edges: the box opens below or above the handle
+    '.wrap[data-edge=h]{left:var(--pos);transform:translateX(-50%)}',
+    '.wrap[data-facing=top]{top:0}.wrap[data-facing=bottom]{bottom:0}',
+    '.wrap[data-edge=h] .panel{position:absolute;left:50%;margin:0;transform:translateX(calc(-1 * var(--pos)))}',
+    '.wrap[data-facing=top] .panel{top:100%;margin-top:6px}.wrap[data-facing=bottom] .panel{bottom:100%;margin-bottom:6px}',
+    // corners: the box opens inward from the corner
+    '.wrap[data-facing=topleft]{top:0;left:0}.wrap[data-facing=topright]{top:0;right:0}',
+    '.wrap[data-facing=bottomleft]{bottom:0;left:0}.wrap[data-facing=bottomright]{bottom:0;right:0}',
+    '.wrap[data-edge=c] .panel{position:absolute;margin:0}',
+    '.wrap[data-facing=topleft] .panel{top:100%;left:0;margin:6px 0 0 6px}.wrap[data-facing=topright] .panel{top:100%;right:0;margin:6px 6px 0 0}',
+    '.wrap[data-facing=bottomleft] .panel{bottom:100%;left:0;margin:0 0 6px 6px}.wrap[data-facing=bottomright] .panel{bottom:100%;right:0;margin:0 6px 6px 0}',
+    // handle shapes
+    '.wrap[data-edge=v][data-shape=pill] .handle{border-radius:999px;width:var(--w);height:var(--h)}',
+    '.wrap[data-edge=v][data-shape=tab] .handle{margin:0;width:var(--tw);height:var(--h)}',
+    '.wrap[data-edge=v][data-shape=tab][data-facing=right] .handle{border-radius:12px 0 0 12px}',
+    '.wrap[data-edge=v][data-shape=tab][data-facing=left] .handle{border-radius:0 12px 12px 0}',
+    '.wrap[data-edge=v][data-shape=square] .handle{border-radius:10px;width:var(--d);height:var(--d)}',
+    '.wrap[data-edge=h] .handle{margin:6px 0;flex-direction:row}',
+    '.wrap[data-edge=h] .lbl{writing-mode:horizontal-tb}',
+    '.wrap[data-edge=h][data-shape=pill] .handle{border-radius:999px;width:var(--h);height:var(--w)}',
+    '.wrap[data-edge=h][data-shape=tab] .handle{margin:0;width:var(--h);height:var(--tw)}',
+    '.wrap[data-edge=h][data-shape=tab][data-facing=top] .handle{border-radius:0 0 12px 12px}',
+    '.wrap[data-edge=h][data-shape=tab][data-facing=bottom] .handle{border-radius:12px 12px 0 0}',
+    '.wrap[data-edge=h][data-shape=square] .handle{border-radius:10px;width:var(--d);height:var(--d)}',
+    // the dot (circle) is a dot everywhere; any other shape in a corner bends to follow the corner
+    '.wrap[data-shape=circle] .handle{border-radius:50%;width:var(--d);height:var(--d)}',
+    '.wrap[data-edge=c] .handle{margin:0;width:var(--cs);height:var(--cs);padding:calc(var(--cs) * .2);--r:18px}',
+    '.wrap[data-edge=c][data-shape=pill] .handle{--r:100%}',
+    '.wrap[data-edge=c][data-shape=square] .handle{--r:12px}',
+    '.wrap[data-edge=c][data-shape=circle] .handle{margin:6px;padding:0;width:var(--d);height:var(--d);border-radius:50%}',
+    '.wrap[data-facing=topleft]:not([data-shape=circle]) .handle{border-radius:0 0 var(--r) 0;align-items:flex-start;justify-content:flex-start}',
+    '.wrap[data-facing=topright]:not([data-shape=circle]) .handle{border-radius:0 0 0 var(--r);align-items:flex-end;justify-content:flex-start}',
+    '.wrap[data-facing=bottomleft]:not([data-shape=circle]) .handle{border-radius:0 var(--r) 0 0;align-items:flex-start;justify-content:flex-end}',
+    '.wrap[data-facing=bottomright]:not([data-shape=circle]) .handle{border-radius:var(--r) 0 0 0;align-items:flex-end;justify-content:flex-end}',
+    '.wrap[data-edge=c] .lbl{display:none}',
     '.handle{box-sizing:border-box;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;border:0;padding:0;margin:0 6px;background:var(--c);color:var(--fg);font:inherit;opacity:.82;box-shadow:0 2px 10px rgba(0,0,0,.45);transition:opacity .15s}',
     '.handle:hover,.wrap[data-open=true] .handle{opacity:1}',
     '.wrap[data-has=true] .handle{opacity:1;box-shadow:0 0 0 2px rgba(255,255,255,.35),0 2px 14px rgba(0,0,0,.5)}',
     '.lbl{writing-mode:vertical-rl;font-weight:600;font-size:11px;letter-spacing:.08em;text-transform:uppercase}',
     '.dot{display:none;position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px var(--c)}',
     '.wrap[data-has=true] .dot{display:block}',
-    '.wrap[data-shape=pill] .handle{border-radius:999px;width:var(--w);height:var(--h)}',
-    '.wrap[data-shape=circle] .handle{border-radius:50%;width:var(--d);height:var(--d)}',
-    '.wrap[data-shape=square] .handle{border-radius:10px;width:var(--d);height:var(--d)}',
-    '.wrap[data-shape=tab] .handle{margin:0;width:var(--tw);height:var(--h)}',
-    '.wrap[data-shape=tab][data-side=right] .handle{border-radius:12px 0 0 12px}',
-    '.wrap[data-shape=tab][data-side=left] .handle{border-radius:0 12px 12px 0}',
     '.wrap[data-shape=circle] .lbl,.wrap[data-shape=square] .lbl{display:none}',
     '.panel{display:none;box-sizing:border-box;width:min(300px,70vw);margin:0 6px;padding:10px;background:#1b2838;border:1px solid var(--c);border-radius:var(--pr);box-shadow:0 6px 24px rgba(0,0,0,.55)}',
     '.wrap[data-open=true] .panel{display:block}',
@@ -348,11 +380,15 @@
   function applyPillSettings() {
     if (!pill) return;
     var sz = SIZES[settings.size] || SIZES.medium;
-    var top = Math.max(8, Math.min(92, settings.vertical));
+    var pos = Math.max(8, Math.min(92, settings.vertical));
+    var f = settings.facing;
+    var edge = (f === 'left' || f === 'right') ? 'v' : (f === 'top' || f === 'bottom') ? 'h' : 'c';
     var w = pill.wrap;
-    w.setAttribute('data-side', settings.side);
+    w.setAttribute('data-facing', f);
+    w.setAttribute('data-edge', edge);
     w.setAttribute('data-shape', settings.shape);
-    w.style.setProperty('--top', top + '%');
+    w.style.setProperty('--pos', pos + '%');
+    w.style.setProperty('--cs', sz.c + 'px');
     w.style.setProperty('--c', settings.color);
     w.style.setProperty('--fg', settings.iconcolor === 'light' ? '#ffffff' : settings.iconcolor === 'dark' ? '#101820' : contrastColor(settings.color));
     w.style.setProperty('--w', sz.w + 'px');

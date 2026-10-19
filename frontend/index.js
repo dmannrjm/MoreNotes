@@ -1,6 +1,6 @@
 // More Notes frontend (classic packaging). `React` and `API` are provided by the build wrapper.
 const PLUGIN = 'MoreNotes';
-const VERSION = '1.4.2';
+const VERSION = '1.5.0';
 const SHOW_DIAGNOSTICS = true; // @build:diagnostics
 const h = React.createElement;
 
@@ -35,8 +35,8 @@ const MAX_NOTE = 4000; // characters; the backend enforces the same limit
 const cpLen = s => Array.from(String(s || '')).length; // code points, so an emoji counts once like the backend counts it
 const clampNote = s => { const a = Array.from(String(s || '')); return a.length > MAX_NOTE ? a.slice(0, MAX_NOTE).join('') : String(s || ''); };
 
-const DEFAULT_SETTINGS = { pill: true, side: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: true };
-const ENUM_VALUES = { side: ['left', 'right'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
+const DEFAULT_SETTINGS = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false };
+const ENUM_VALUES = { facing: ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
 
 function mergeSettings(base, incoming) {
   const out = { ...base };
@@ -47,6 +47,7 @@ function mergeSettings(base, incoming) {
   if (typeof incoming.libtab === 'boolean') out.libtab = incoming.libtab;
   if (typeof incoming.backupdir === 'string') out.backupdir = incoming.backupdir.slice(0, 240);
   for (const k of Object.keys(ENUM_VALUES)) if (ENUM_VALUES[k].includes(incoming[k])) out[k] = incoming[k];
+  if (incoming.facing === undefined && (incoming.side === 'left' || incoming.side === 'right')) out.facing = incoming.side; // older versions
   const v = Number(incoming.vertical);
   if (Number.isFinite(v)) out.vertical = Math.max(0, Math.min(100, Math.round(v)));
   if (typeof incoming.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(incoming.color)) out.color = incoming.color.toLowerCase();
@@ -408,7 +409,19 @@ const diag = {
 // ---------------------------------------------------------------------------
 const PAGE_SIZE = 100;
 
-const SIDE_OPTIONS = [{ data: 0, value: 'left', label: 'Left edge' }, { data: 1, value: 'right', label: 'Right edge' }];
+const FACING_OPTIONS = [
+  { data: 0, value: 'left', label: 'Left edge' }, { data: 1, value: 'right', label: 'Right edge' },
+  { data: 2, value: 'top', label: 'Top edge' }, { data: 3, value: 'bottom', label: 'Bottom edge' },
+  { data: 4, value: 'topleft', label: 'Top-left corner' }, { data: 5, value: 'topright', label: 'Top-right corner' },
+  { data: 6, value: 'bottomleft', label: 'Bottom-left corner' }, { data: 7, value: 'bottomright', label: 'Bottom-right corner' },
+];
+const edgeOf = f => (f === 'left' || f === 'right') ? 'v' : (f === 'top' || f === 'bottom') ? 'h' : 'c';
+const SIZE_DIMS = { small: { w: 26, h: 84, d: 40, tw: 22, c: 56 }, medium: { w: 32, h: 104, d: 48, tw: 26, c: 68 }, large: { w: 38, h: 124, d: 56, tw: 30, c: 80 } };
+const COLOUR_PRESETS = [
+  { data: 0, label: 'Steam blue', hex: '#1a9fff' }, { data: 1, label: 'Green', hex: '#5ba32b' }, { data: 2, label: 'Orange', hex: '#e8863a' },
+  { data: 3, label: 'Purple', hex: '#8f5bd1' }, { data: 4, label: 'Pink', hex: '#e0589b' }, { data: 5, label: 'Red', hex: '#d9534f' },
+  { data: 6, label: 'Grey', hex: '#8b929a' }, { data: 7, label: 'Custom', hex: null },
+];
 const SHAPE_OPTIONS = [
   { data: 0, value: 'pill', label: 'Pill' }, { data: 1, value: 'circle', label: 'Circle' },
   { data: 2, value: 'square', label: 'Rounded square' }, { data: 3, value: 'tab', label: 'Edge tab' },
@@ -448,31 +461,55 @@ function iconFg(st) { return st.iconcolor === 'light' ? '#ffffff' : st.iconcolor
 const NOTE_ICON_PATHS = [h('path', { key: 1, d: 'M5 3h10l4 4v14H5z' }), h('path', { key: 2, d: 'M15 3v4h4' }), h('path', { key: 3, d: 'M8 12h8M8 16h6' })];
 const noteIcon = (size, color) => h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: color || 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, NOTE_ICON_PATHS);
 
-// A copy of the collapsed tab, drawn from the current settings (same shapes and sizes as on the pages).
+// Geometry of the collapsed tab for a facing: an edge tab, or (for any shape except the dot) a corner piece that bends
+// to follow the corner. Same shapes and sizes as on the pages.
+function tabStyle(st, k) {
+  const d = SIZE_DIMS[st.size] || SIZE_DIMS.medium;
+  const edge = edgeOf(st.facing);
+  const base = { background: st.color, color: iconFg(st), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,.45)', boxSizing: 'border-box' };
+  if (st.shape === 'circle') return { ...base, width: d.d * k, height: d.d * k, borderRadius: '50%' };
+  if (edge === 'c') {
+    const r = st.shape === 'pill' ? '100%' : st.shape === 'tab' ? `${18 * k}px` : `${12 * k}px`;
+    const radius = { topleft: `0 0 ${r} 0`, topright: `0 0 0 ${r}`, bottomleft: `0 ${r} 0 0`, bottomright: `${r} 0 0 0` }[st.facing];
+    const align = { topleft: ['flex-start', 'flex-start'], topright: ['flex-end', 'flex-start'], bottomleft: ['flex-start', 'flex-end'], bottomright: ['flex-end', 'flex-end'] }[st.facing];
+    return { ...base, width: d.c * k, height: d.c * k, borderRadius: radius, alignItems: align[0], justifyContent: align[1], padding: d.c * k * 0.2 };
+  }
+  const horiz = edge === 'h';
+  if (st.shape === 'pill') return { ...base, flexDirection: horiz ? 'row' : 'column', width: (horiz ? d.h : d.w) * k, height: (horiz ? d.w : d.h) * k, borderRadius: 999 };
+  if (st.shape === 'square') return { ...base, width: d.d * k, height: d.d * k, borderRadius: 10 * k };
+  const t = 12 * k;
+  const radius = { right: `${t}px 0 0 ${t}px`, left: `0 ${t}px ${t}px 0`, top: `0 0 ${t}px ${t}px`, bottom: `${t}px ${t}px 0 0` }[st.facing];
+  return { ...base, width: (horiz ? d.h : d.tw) * k, height: (horiz ? d.tw : d.h) * k, borderRadius: radius };
+}
+
+// A copy of the collapsed tab, drawn from the current settings.
 function TabIcon(props) {
   const st = props.st, k = props.scale || 1;
-  const dims = { small: [26, 84, 40, 22], medium: [32, 104, 48, 26], large: [38, 124, 56, 30] }[st.size] || [32, 104, 48, 26];
-  const base = { background: st.color, color: iconFg(st), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,.45)', boxSizing: 'border-box' };
-  let style;
-  if (st.shape === 'pill') style = { ...base, width: dims[0] * k, height: dims[1] * k, borderRadius: 999 };
-  else if (st.shape === 'circle') style = { ...base, width: dims[2] * k, height: dims[2] * k, borderRadius: '50%' };
-  else if (st.shape === 'square') style = { ...base, width: dims[2] * k, height: dims[2] * k, borderRadius: 10 * k };
-  else style = { ...base, width: dims[3] * k, height: dims[1] * k, borderRadius: st.side === 'right' ? `${12 * k}px 0 0 ${12 * k}px` : `0 ${12 * k}px ${12 * k}px 0` };
-  return h('div', { style }, noteIcon(Math.round(18 * k)));
+  return h('div', { style: tabStyle(st, k) }, noteIcon(Math.round(18 * k)));
 }
 
-// Shows the tab on the chosen page edge at the chosen offset, so its final location is visible while adjusting.
+// Where the tab's wrapper sits inside the preview box for a facing and offset.
+function placementStyle(st) {
+  const pos = Math.max(8, Math.min(92, st.vertical));
+  const margin = st.shape === 'tab' ? 0 : 6; // tabs are flush with their edge, the others float 6px in
+  const edge = edgeOf(st.facing);
+  if (edge === 'v') return { position: 'absolute', top: `${pos}%`, [st.facing]: margin, transform: 'translateY(-50%)' };
+  if (edge === 'h') return { position: 'absolute', left: `${pos}%`, [st.facing]: margin, transform: 'translateX(-50%)' };
+  const inset = st.shape === 'circle' ? 6 : 0; // the dot floats; every other shape sits flush in the corner
+  const corner = { topleft: ['top', 'left'], topright: ['top', 'right'], bottomleft: ['bottom', 'left'], bottomright: ['bottom', 'right'] }[st.facing];
+  return { position: 'absolute', [corner[0]]: inset, [corner[1]]: inset };
+}
+
+// Shows the tab on the chosen edge or corner at the chosen offset, so its final location is visible while adjusting.
 function PlacementPreview(props) {
   const st = props.st;
-  const top = Math.max(8, Math.min(92, st.vertical));
-  const edge = st.side === 'left' ? 'left' : 'right';
   return h('div', { style: { position: 'relative', width: '100%', height: 170, boxSizing: 'border-box', border: '1px solid var(--gpColor-Border, rgba(255,255,255,.28))', borderRadius: 6, background: 'rgba(255,255,255,.04)', overflow: 'hidden' } },
-    h('div', { style: { position: 'absolute', left: 0, right: 0, top: '50%', borderTop: '1px dashed rgba(255,255,255,.22)' } }),
-    h('div', { style: { position: 'absolute', top: 4, [edge === 'left' ? 'right' : 'left']: 8, fontSize: 11, opacity: 0.55 } }, 'page edge'),
-    h('div', { style: { position: 'absolute', top: `${top}%`, [edge]: st.shape === 'tab' ? 0 : 6, transform: 'translateY(-50%)' } }, h(TabIcon, { st, scale: 0.7 })));
+    h('div', { style: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: 11, opacity: 0.35 } }, 'page'),
+    h('div', { style: placementStyle(st) }, h(TabIcon, { st, scale: 0.7 })));
 }
 
-function ColourPanel() {
+// Small panel shown only when "Custom" is chosen: swatches, hue / saturation / lightness, hex, icon colour.
+function CustomColourPanel() {
   useStore();
   const st = store.settings;
   const [hsl, setHsl] = React.useState(null);
@@ -493,15 +530,9 @@ function ColourPanel() {
       style: { width: 28, height: 28, borderRadius: 6, background: hex, cursor: 'pointer', boxSizing: 'border-box', border: hex === st.color ? '2px solid #fff' : '1px solid rgba(255,255,255,.28)' },
     });
   };
-  const dd = (opts, value, onPick) => h(Dropdown, {
-    rgOptions: opts.map(o => ({ data: o.data, label: o.label })),
-    selectedOption: Math.max(0, opts.findIndex(o => o.value === value)),
-    strDefaultLabel: opts[Math.max(0, opts.findIndex(o => o.value === value))].label,
-    onChange: o => onPick(opts.find(x => x.data === o.data)),
-  });
-  return h('div', { style: { display: 'flex', flexDirection: 'column' } },
-    h(Field, { label: 'Colours', description: 'Colour of the tab and of the note box outline, on store, community and profile pages.' },
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } }, h(TabIcon, { st, scale: 0.6 }), h('span', { style: { opacity: 0.75, fontSize: 12 } }, st.color))),
+  const iconIdx = Math.max(0, ICON_OPTIONS.findIndex(o => o.value === st.iconcolor));
+  return h('div', { style: { margin: '4px 0 10px 12px', paddingLeft: 12, borderLeft: '2px solid var(--gpColor-Blue, #1a9fff)', display: 'flex', flexDirection: 'column' } },
+    h(Field, { label: 'Custom colour' }, h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } }, h(TabIcon, { st, scale: 0.6 }), h('span', { style: { opacity: 0.75, fontSize: 12 } }, st.color))),
     h(Field, { label: 'Swatches' }, h(Focusable, { style: { display: 'flex', flexWrap: 'wrap', gap: 8, maxWidth: 300, justifyContent: 'flex-end' } }, SWATCHES.map(swatch))),
     h(SliderField, { label: 'Hue', value: cur.h, min: 0, max: 360, step: 1, showValue: true, onChange: v => setHslPart('h', v) }),
     h(SliderField, { label: 'Saturation', value: cur.s, min: 0, max: 100, step: 1, showValue: true, valueSuffix: '%', onChange: v => setHslPart('s', v) }),
@@ -516,7 +547,27 @@ function ColourPanel() {
       },
     }),
     hexValid ? null : h(Field, { label: 'Enter six hex digits, like #1a9fff.' }),
-    h(Field, { label: 'Icon colour', description: 'The note icon on the tab.' }, dd(ICON_OPTIONS, st.iconcolor, o => store.saveSettings({ iconcolor: o.value }))));
+    h(Field, { label: 'Icon colour', description: 'The note icon on the tab.' }, h(Dropdown, {
+      rgOptions: ICON_OPTIONS.map(o => ({ data: o.data, label: o.label })), selectedOption: iconIdx, strDefaultLabel: ICON_OPTIONS[iconIdx].label,
+      onChange: o => store.saveSettings({ iconcolor: ICON_OPTIONS.find(x => x.data === o.data).value }),
+    })));
+}
+
+// The colour setting: a short list of suggested colours; choosing Custom opens the small panel above.
+function ColourRow() {
+  useStore();
+  const st = store.settings;
+  const [custom, setCustom] = React.useState(!COLOUR_PRESETS.some(c => c.hex === st.color));
+  const idx = custom ? 7 : Math.max(0, COLOUR_PRESETS.findIndex(c => c.hex === st.color));
+  return h('div', { style: { display: 'flex', flexDirection: 'column' } },
+    h(Field, { label: 'Colour', description: 'Colour of the tab and of the note box outline.' }, h(Dropdown, {
+      rgOptions: COLOUR_PRESETS.map(c => ({ data: c.data, label: c.label })), selectedOption: idx, strDefaultLabel: COLOUR_PRESETS[idx].label,
+      onChange: o => {
+        const preset = COLOUR_PRESETS.find(c => c.data === o.data);
+        if (preset.hex) { setCustom(false); store.saveSettings({ color: preset.hex }); } else setCustom(true);
+      },
+    })),
+    custom ? h(CustomColourPanel) : null);
 }
 
 function backupStatus(bk) {
@@ -591,13 +642,15 @@ function NotesManager() {
 
   children.push(h(Field, { key: 'pill-head', label: 'Note tab', description: 'A small tab docked to the side of store, community and profile pages. Click it to expand a box for writing the note. Open pages pick up changes when you switch back to them.' }));
   children.push(h(Field, { key: 'pill-on', label: 'Show the tab' }, h(Toggle, { value: st.pill, onChange: v => store.saveSettings({ pill: v }) })));
-  children.push(h(Field, { key: 'pill-side', label: 'Side' }, dropdown(SIDE_OPTIONS, st.side, o => store.saveSettings({ side: o.value }))));
-  children.push(h(SliderField, { key: 'pill-offset', label: 'Up/down offset (all tabs)', value: st.vertical - 50, min: -OFFSET_LIMIT, max: OFFSET_LIMIT, step: 1, showValue: true, valueSuffix: '%', onChange: v => store.saveSettings({ vertical: 50 + v }) }));
-  children.push(h(Field, { key: 'pill-place', label: 'Final location', description: 'A copy of the tab icon on the side it will sit, at the offset above. Negative moves every tab up, positive down; the dashed line is the middle of the page.' }));
+  const edge = edgeOf(st.facing);
+  children.push(h(Field, { key: 'pill-facing', label: 'Facing', description: 'Direction' }, dropdown(FACING_OPTIONS, st.facing, o => store.saveSettings({ facing: o.value }))));
+  if (edge === 'c') children.push(h(Field, { key: 'pill-offset-note', label: 'Offset (all tabs)', description: 'Corners ignore the offset.' }));
+  else children.push(h(SliderField, { key: 'pill-offset', label: edge === 'v' ? 'Up/down offset (all tabs)' : 'Left/right offset (all tabs)', value: st.vertical - 50, min: -OFFSET_LIMIT, max: OFFSET_LIMIT, step: 1, showValue: true, valueSuffix: '%', onChange: v => store.saveSettings({ vertical: 50 + v }) }));
+  children.push(h(Field, { key: 'pill-place', label: 'Final location', description: 'A copy of the tab icon on the edge or corner it will sit on. Shapes other than the dot bend to follow a corner.' }));
   children.push(h('div', { key: 'pill-place-box', style: { padding: '4px 0 14px' } }, h(PlacementPreview, { st })));
   children.push(h(Field, { key: 'pill-shape', label: 'Shape' }, dropdown(SHAPE_OPTIONS, st.shape, o => store.saveSettings({ shape: o.value }))));
   children.push(h(Field, { key: 'pill-size', label: 'Size' }, dropdown(SIZE_OPTIONS, st.size, o => store.saveSettings({ size: o.value }))));
-  children.push(h(ColourPanel, { key: 'pill-colours' }));
+  children.push(h(ColourRow, { key: 'pill-colours' }));
   children.push(h(Field, { key: 'libtab', label: 'Notes tab on game pages', description: "Adds a Notes tab to the tab row of a game's library page, next to Achievements. Takes effect the next time a game page opens." },
     h(Toggle, { value: st.libtab, onChange: v => store.saveSettings({ libtab: v }) })));
   children.push(h(Field, { key: 'pill-inline', label: 'Also show a note line under titles', description: 'The older inline note under the game or persona name. List pages (friends, wishlist) always show per-row notes.' },

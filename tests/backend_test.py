@@ -56,7 +56,7 @@ def check(name, cond):
     print(('ok   - ' if cond else 'FAIL - ') + name)
     if not cond: failures.append(name)
 
-DEFAULTS = {'pill': True, 'side': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': False, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': True}
+DEFAULTS = {'pill': True, 'facing': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': False, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False}
 
 fresh()
 L = Lua()
@@ -69,27 +69,27 @@ check('ready() is called once even if on_load runs twice', L.run('return tostrin
 check('get_info reports the config path', L.call('get_info')['path'] == '/tmp/steamtest/config/MoreNotes_notes.json')
 
 # ---- the call that crashed Steam: settings, delivered as one JSON string
-payload = json.dumps({'pill': False, 'side': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#E0589B', 'inline': True})
+payload = json.dumps({'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#E0589B', 'inline': True})
 r = L.call('set_settings', '{ json = %s }' % lua_str(payload))
-check('set_settings accepts one JSON string and returns the settings', r['ok'] and r['settings'] == {'pill': False, 'side': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#e0589b', 'inline': True, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': True})
-check('settings are written to disk', json.loads(NOTES.read_text())['settings']['side'] == 'left')
+check('set_settings accepts one JSON string and returns the settings', r['ok'] and r['settings'] == {'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#e0589b', 'inline': True, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False})
+check('settings are written to disk', json.loads(NOTES.read_text())['settings']['facing'] == 'left')
 L.close(); L = Lua()
 check('settings survive a restart', L.call('get_all')['settings']['shape'] == 'circle' and L.call('get_settings')['settings']['color'] == '#e0589b')
 
 r = L.call('set_settings', "{ pill = 'true', vertical = '45' }")
 check('string-valued table arguments still work', r['ok'] and r['settings']['pill'] is True and r['settings']['vertical'] == 45)
 before = L.call('get_settings')['settings']
-bad = json.dumps({'side': 'top', 'shape': 'star', 'size': 'huge', 'vertical': 'abc', 'color': 'red', 'pill': 'maybe', 'inline': 7})
+bad = json.dumps({'facing': 'sideways', 'side': 'top', 'shape': 'star', 'size': 'huge', 'vertical': 'abc', 'color': 'red', 'pill': 'maybe', 'inline': 7})
 L.call('set_settings', '{ json = %s }' % lua_str(bad))
 check('invalid values are ignored', L.call('get_settings')['settings'] == before)
 check('vertical is clamped to 0-100', L.call('set_settings', '{ json = %s }' % lua_str('{"vertical":150}'))['settings']['vertical'] == 100 and L.call('set_settings', '{ json = %s }' % lua_str('{"vertical":-5}'))['settings']['vertical'] == 0)
-check('whole-document string argument works', L.call('set_settings', lua_str('{"side":"right"}'))['settings']['side'] == 'right')
-check('a leftover urlbar key from an older version is ignored', 'urlbar' not in L.call('set_settings', '{ json = %s }' % lua_str('{"urlbar":false,"side":"left"}'))['settings'])
-r = L.call('set_settings', '{ json = %s }' % lua_str('{"iconcolor":"dark","libtab":false}'))
-check('icon colour and library-tab settings are accepted', r['settings']['iconcolor'] == 'dark' and r['settings']['libtab'] is False)
+check('whole-document string argument works', L.call('set_settings', lua_str('{"facing":"right"}'))['settings']['facing'] == 'right')
+check('a leftover urlbar key from an older version is ignored', 'urlbar' not in L.call('set_settings', '{ json = %s }' % lua_str('{"urlbar":false,"facing":"left"}'))['settings'])
+r = L.call('set_settings', '{ json = %s }' % lua_str('{"iconcolor":"dark","libtab":true}'))
+check('icon colour and library-tab settings are accepted', r['settings']['iconcolor'] == 'dark' and r['settings']['libtab'] is True)
 r = L.call('set_settings', '{ json = %s }' % lua_str('{"iconcolor":"rainbow","libtab":"maybe"}'))
-check('invalid icon colour / library-tab values are ignored', r['settings']['iconcolor'] == 'dark' and r['settings']['libtab'] is False)
-L.call('set_settings', '{ json = %s }' % lua_str('{"iconcolor":"auto","libtab":true}'))
+check('invalid icon colour / library-tab values are ignored', r['settings']['iconcolor'] == 'dark' and r['settings']['libtab'] is True)
+L.call('set_settings', '{ json = %s }' % lua_str('{"iconcolor":"auto","libtab":false}'))
 check('garbage JSON is harmless', L.call('set_settings', '{ json = %s }' % lua_str('{not json'))['ok'])
 
 # ---- notes
@@ -144,7 +144,7 @@ L.call('set_note', '{ key = "app:620", text = "   " }')
 check('blank text deletes the note', 'app:620' not in L.call('get_all')['notes'])
 L.call('delete_note', '{ key = "app:1" }')
 check('delete_note removes it', 'app:1' not in L.call('get_all')['notes'])
-check('settings survive note edits', L.call('get_settings')['settings']['side'] == 'left')
+check('settings survive note edits', L.call('get_settings')['settings']['facing'] == 'left')
 
 # ---- corrupted file
 L.close()
@@ -170,13 +170,13 @@ def mirror_doc_path(p):
 fresh()
 L = Lua()
 L.run('on_load() return ""')
-check('first load writes an external copy', (BK / 'MoreNotes_notes.json').exists() and mirror_doc()['settings']['side'] == 'right' and mirror_doc()['saved_at'] > 0)
+check('first load writes an external copy', (BK / 'MoreNotes_notes.json').exists() and mirror_doc()['settings']['facing'] == 'right' and mirror_doc()['saved_at'] > 0)
 L.call('set_note', '{ key = "app:1", text = "one", label = "Game one" }')
 check('every note change updates the external copy', mirror_doc()['notes']['app:1']['text'] == 'one')
 check('a weekly snapshot is kept (one file per weekday, never more than seven)', (BK / ('MoreNotes_snapshot_%s.json' % time.strftime('%w'))).exists())
 check('today\'s snapshot tracks every save', mirror_doc_path(BK / ('MoreNotes_snapshot_%s.json' % time.strftime('%w')))['notes']['app:1']['text'] == 'one')
-L.call('set_settings', '{ json = %s }' % lua_str('{"side":"left"}'))
-check('settings changes are copied too', mirror_doc()['settings']['side'] == 'left')
+L.call('set_settings', '{ json = %s }' % lua_str('{"facing":"left"}'))
+check('settings changes are copied too', mirror_doc()['settings']['facing'] == 'left')
 info = L.call('backup_info')
 check('backup_info reports folder, time and count', info['ok'] and info['enabled'] and info['dir'] == str(BK) and info['count'] == 1 and info['saved_at'] > 0 and info['error'] == '')
 check('the default folder is reported for the settings page', info['default_dir'] == str(BK))
@@ -187,7 +187,7 @@ check('the primary file is outside the plugin folder', NOTES.parent == STEAM / '
 L.close(); NOTES.unlink()
 L = Lua()
 r = L.call('get_all')
-check('missing primary file is restored from the external copy (notes and settings)', r['notes']['app:1']['text'] == 'one' and r['settings']['side'] == 'left')
+check('missing primary file is restored from the external copy (notes and settings)', r['notes']['app:1']['text'] == 'one' and r['settings']['facing'] == 'left')
 check('the restore is reported and the primary file is back', L.call('backup_info')['restored_from'].endswith('.json') and NOTES.exists())
 
 # primary file damaged
@@ -302,7 +302,7 @@ snap(BK, others[1], 3, 'three-days-ago')
 dest = CUSTOM / 'Moved Here'
 snap(dest, others[0], 5, 'stale-in-destination')
 r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'backupdir': str(dest)})))
-check('the folder can be changed while running and a copy is written there at once', r['settings']['backupdir'] == str(dest) and mirror_doc(dest)['settings']['side'] == 'right')
+check('the folder can be changed while running and a copy is written there at once', r['settings']['backupdir'] == str(dest) and mirror_doc(dest)['settings']['facing'] == 'right')
 check('earlier snapshots come along to the new folder', 'app:three-days-ago' in mirror_doc_path(dest / ('MoreNotes_snapshot_%s.json' % others[1]))['notes'])
 check('a newer snapshot replaces a stale one in the destination', 'app:yesterday' in mirror_doc_path(dest / ('MoreNotes_snapshot_%s.json' % others[0]))['notes'])
 check("today's snapshot in the new folder tracks the current notes", (dest / ('MoreNotes_snapshot_%s.json' % time.strftime('%w'))).exists())
@@ -310,6 +310,37 @@ L.call('set_note', '{ key = "app:moved", text = "after the move" }')
 check('later changes go to the new folder only', mirror_doc(dest)['notes']['app:moved']['text'] == 'after the move' and 'app:moved' not in mirror_doc()['notes'])
 r = L.call('set_settings', '{ json = %s }' % lua_str('{"backupdir":""}'))
 check('and it can be switched back to the default folder', r['settings']['backupdir'] == '' and L.call('backup_info')['dir'] == str(BK) and mirror_doc()['notes']['app:moved']['text'] == 'after the move')
+L.close()
+
+# =====================================================================================================
+# Facing: four edges and four corners; older "side" values migrate
+# =====================================================================================================
+fresh()
+L = Lua(); L.run('on_load() return ""')
+for f in ('left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright'):
+    r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'facing': f})))
+    check('facing "%s" is accepted' % f, r['settings']['facing'] == f)
+for bad_f in ('center', 'TOP', 'top-left', '', 'sideways'):
+    r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'facing': bad_f})))
+    check('facing %r is rejected' % bad_f, r['settings']['facing'] == 'bottomright')
+check('the old "side" key is no longer part of the settings', 'side' not in L.call('get_settings')['settings'])
+L.close()
+
+# an older file that stored side: "left" keeps working
+fresh()
+NOTES.parent.mkdir(parents=True, exist_ok=True)
+NOTES.write_text(json.dumps({'version': 1, 'notes': {}, 'settings': {'side': 'left', 'vertical': 30}}))
+L = Lua()
+r = L.call('get_all')
+check('an older saved side becomes the facing', r['settings']['facing'] == 'left' and 'side' not in r['settings'] and r['settings']['vertical'] == 30)
+L.call('set_settings', '{ json = %s }' % lua_str('{"side":"right"}'))
+check('a legacy side value in an update is still understood', L.call('get_settings')['settings']['facing'] == 'right')
+L.call('set_settings', '{ json = %s }' % lua_str('{"side":"top"}'))
+check('a legacy side value outside left/right is ignored', L.call('get_settings')['settings']['facing'] == 'right')
+L.call('set_settings', '{ json = %s }' % lua_str('{"facing":"topleft","side":"right"}'))
+check('facing wins over a legacy side sent alongside it', L.call('get_settings')['settings']['facing'] == 'topleft')
+check('the library note tab is off by default', DEFAULTS['libtab'] is False and L.call('get_settings')['settings']['libtab'] is False)
+check('the inline note line under titles is off by default', L.call('get_settings')['settings']['inline'] is False)
 L.close()
 
 print('\n%d failure(s)' % len(failures))

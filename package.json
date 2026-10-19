@@ -1,6 +1,6 @@
 {
   "name": "more-notes",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Millennium plugin: private notes on people and games across Steam pages.",
   "private": true,
   "type": "module",

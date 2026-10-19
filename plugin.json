@@ -1,9 +1,9 @@
 {
   "name": "MoreNotes",
   "common_name": "More Notes",
-  "description": "Private notes for Steam.",
-  "version": "1.4.2",
-  "author": "dmann-rjm",
+  "description": "Private Notes for Steam",
+  "version": "1.5.0",
+  "author": "your-name",
   "useBackend": true,
   "backendType": "lua"
 }
