@@ -1,3 +1,7 @@
+**Reminder how to use this plugin:**
+
+Place in your plugin folder (default C:\Program Files (x86)\Steam\millennium\plugins) and extract all.
+
 # More Notes (Millennium plugin)
 
 Private notes on **people** and **games**, shown in more places across Steam:
