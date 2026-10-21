@@ -210,9 +210,9 @@ local function safe_path(p)
 end
 
 -- Appearance + backup settings.
-local DEFAULTS = { pill = true, facing = "right", vertical = 50, shape = "pill", size = "medium", color = "#1a9fff", inline = false, backup = true, backupdir = "", iconcolor = "auto", libtab = false }
+local DEFAULTS = { pill = true, facing = "right", vertical = 50, shape = "pill", size = "medium", color = "#1a9fff", inline = false, backup = true, backupdir = "", iconcolor = "auto", libtab = false, libdock = true }
 local ENUMS = {
-  facing = { left = true, right = true, top = true, bottom = true, topleft = true, topright = true, bottomleft = true, bottomright = true },
+  facing = { left = true, right = true, top = true, bottom = true, topleft = true, topright = true, bottomleft = true, bottomright = true, addressbar = true },
   shape = { pill = true, circle = true, square = true, tab = true },
   size = { small = true, medium = true, large = true },
   iconcolor = { auto = true, light = true, dark = true },
@@ -237,6 +237,8 @@ local function apply_settings(a)
   if b ~= nil then settings.backup = b end
   b = as_bool(a.libtab)
   if b ~= nil then settings.libtab = b end
+  b = as_bool(a.libdock)
+  if b ~= nil then settings.libdock = b end
   for k, allowed in pairs(ENUMS) do
     if type(a[k]) == "string" and allowed[a[k]] then settings[k] = a[k] end
   end

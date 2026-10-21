@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0
+- **Colour box**: choosing Custom opens an independent box (its own Steam popup) with a saturation/brightness square, hue, saturation, brightness, red/green/blue sliders, a hex field, a 72-colour palette (12 hues x 5 lightness levels plus greys), Current vs New previews and the icon colour. Nothing is applied until "Use this colour". If the popup cannot open or never appears, the same box is shown inside the settings page instead. The small inline panel is gone.
+- **Edit button in settings fixed**: Edit now expands an editor right under the row (text box, counter, Save, Cancel) instead of relying on a popup that was not appearing. Popups that are still used (the colour box, the address-bar button's editor) now try the window the click came from first, then the settings window, then the Library window.
+- **Library tab**: a docked note tab drawn over the Library window, holding a Library note (`page:library`). It uses the same facing, offset, shape, size and colour settings as the web-page tab, hides while a web page is showing (the page has its own tab), and has its own switch ("Show the tab in the Library") and status line. The docked tab code is now one shared module used by both the web-page script and the Library.
+- **Address bar option** in the Facing dropdown: the note button goes beside the address bar (store/community addresses: a game, a `/profiles/` person, or the page itself) and opens the native note editor. Choosing it disables and hides the edge controls (offset, final location, size, the Library tab) and the edge tab on web pages and in the Library; shape and colour still style the button. A status line says what the button sees.
+- Setting `libdock` (default on) and facing value `addressbar` added to the backend.
+
 ## 1.5.0
 - "Side" is now **Facing** (with the control labelled **Direction**): left, right, top or bottom edge, or any of the four corners. On a top or bottom edge the offset slider runs left/right along the edge; corners ignore the offset.
 - Corner snap: in a corner, every shape except the dot bends to follow the corner (the pill becomes a quarter-round piece, the edge tab and the rounded square get a rounded inner corner); the dot stays a dot floating 6px in. The settings preview and the web pages draw the same shapes, and the note box opens inward from the corner.

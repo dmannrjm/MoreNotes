@@ -56,7 +56,7 @@ def check(name, cond):
     print(('ok   - ' if cond else 'FAIL - ') + name)
     if not cond: failures.append(name)
 
-DEFAULTS = {'pill': True, 'facing': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': False, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False}
+DEFAULTS = {'pill': True, 'facing': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': False, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False, 'libdock': True}
 
 fresh()
 L = Lua()
@@ -71,7 +71,7 @@ check('get_info reports the config path', L.call('get_info')['path'] == '/tmp/st
 # ---- the call that crashed Steam: settings, delivered as one JSON string
 payload = json.dumps({'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#E0589B', 'inline': True})
 r = L.call('set_settings', '{ json = %s }' % lua_str(payload))
-check('set_settings accepts one JSON string and returns the settings', r['ok'] and r['settings'] == {'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#e0589b', 'inline': True, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False})
+check('set_settings accepts one JSON string and returns the settings', r['ok'] and r['settings'] == {'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#e0589b', 'inline': True, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False, 'libdock': True})
 check('settings are written to disk', json.loads(NOTES.read_text())['settings']['facing'] == 'left')
 L.close(); L = Lua()
 check('settings survive a restart', L.call('get_all')['settings']['shape'] == 'circle' and L.call('get_settings')['settings']['color'] == '#e0589b')
@@ -317,12 +317,12 @@ L.close()
 # =====================================================================================================
 fresh()
 L = Lua(); L.run('on_load() return ""')
-for f in ('left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright'):
+for f in ('left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright', 'addressbar'):
     r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'facing': f})))
     check('facing "%s" is accepted' % f, r['settings']['facing'] == f)
 for bad_f in ('center', 'TOP', 'top-left', '', 'sideways'):
     r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'facing': bad_f})))
-    check('facing %r is rejected' % bad_f, r['settings']['facing'] == 'bottomright')
+    check('facing %r is rejected' % bad_f, r['settings']['facing'] == 'addressbar')
 check('the old "side" key is no longer part of the settings', 'side' not in L.call('get_settings')['settings'])
 L.close()
 
@@ -339,6 +339,11 @@ L.call('set_settings', '{ json = %s }' % lua_str('{"side":"top"}'))
 check('a legacy side value outside left/right is ignored', L.call('get_settings')['settings']['facing'] == 'right')
 L.call('set_settings', '{ json = %s }' % lua_str('{"facing":"topleft","side":"right"}'))
 check('facing wins over a legacy side sent alongside it', L.call('get_settings')['settings']['facing'] == 'topleft')
+r = L.call('set_settings', '{ json = %s }' % lua_str('{"libdock":false}'))
+check('the Library tab switch (libdock) is accepted and defaults to on', r['settings']['libdock'] is False and DEFAULTS['libdock'] is True)
+r = L.call('set_settings', '{ json = %s }' % lua_str('{"libdock":"maybe"}'))
+check('an invalid libdock value is ignored', r['settings']['libdock'] is False)
+L.call('set_settings', '{ json = %s }' % lua_str('{"libdock":true}'))
 check('the library note tab is off by default', DEFAULTS['libtab'] is False and L.call('get_settings')['settings']['libtab'] is False)
 check('the inline note line under titles is off by default', L.call('get_settings')['settings']['inline'] is False)
 L.close()

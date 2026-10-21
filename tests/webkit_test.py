@@ -290,6 +290,16 @@ with sync_playwright() as p:
     look(facing='top', **base); pg.screenshot(path='/tmp/pill_top.png')
     look(facing='right', **base)
 
+    # address bar option: the edge tab is not drawn on web pages
+    settings.update({'facing': 'addressbar'})
+    pg.evaluate("window.dispatchEvent(new Event('focus'))")
+    pg.wait_for_function("!document.querySelector('#morenotes-pill')")
+    check('the Address bar option removes the edge tab on web pages', pg.locator('#morenotes-pill').count() == 0)
+    settings.update({'facing': 'right'})
+    pg.evaluate("window.dispatchEvent(new Event('focus'))")
+    pg.wait_for_selector('#morenotes-pill', state='attached')
+    check('choosing an edge again brings the tab back', pg.locator('#morenotes-pill .handle').is_visible())
+
     # inline setting on/off
     settings.update({'inline': True})
     pg.evaluate("window.dispatchEvent(new Event('focus'))")

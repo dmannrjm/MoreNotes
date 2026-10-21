@@ -67,7 +67,7 @@ const stub = name => { const f = props => React.createElement('div', { ...props,
 
 // ---- fake backend (mirrors the Lua semantics we rely on) -------------------------------------
 const backendNotes = {};
-let backendSettings = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false };
+let backendSettings = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false, libdock: true };
 let backupInfoReply = { ok: true, enabled: true, dir: 'C:/Users/me/Documents/MoreNotes Backup', saved_at: 1760700000, count: 3, error: '', restored_from: '', default_dir: 'C:/Users/me/Documents/MoreNotes Backup' };
 let restoreReply = { ok: true, count: 2, from: 'x' };
 let acceptDir = true;
@@ -223,19 +223,55 @@ await test('search filters the list', async () => {
   fields().find(f => /^Search/.test(f.props.placeholder)).props.onChange({ target: { value: '' } }); rerender();
 });
 
-await test('Edit opens the native modal on the library window', async () => {
-  const edit = findAll(tree, n => n.host === 'DialogButton').find(b => b.props.children === 'Edit');
-  edit.props.onClick();
-  assert.equal(modalCalls.length, 1);
-  assert.equal(modalCalls[0].win.id, 'SP Desktop_uid0');
-  assert.equal(modalCalls[0].opts.strTitle, 'Note');
+const counterText = t => { let out = ''; walk(t, n => { if (n.host === 'NoteCounter') out += textOf(n); }); return out; };
+
+await test('Edit expands an inline editor under the row; no popup is needed', async () => {
+  const modalsBefore = modalCalls.length;
+  const editBtn = () => findAll(findAll(tree, n => n.host === 'Field' && n.props.label === 'Game: 620')[0], n => n.host === 'DialogButton').find(b => b.props.children === 'Edit' || b.props.children === 'Close');
+  const original = backendNotes['app:620'].text;
+  editBtn().props.onClick(); rerender();
+  assert.equal(modalCalls.length, modalsBefore, 'Edit never calls showModal');
+  const field = () => findAll(tree, n => n.host === 'TextField' && n.props.placeholder === 'Write a note…')[0];
+  assert.ok(field(), 'the inline text box appears');
+  assert.ok(findAll(tree, n => n.host === 'DialogButton').some(b => b.props.children === 'Close'), 'the row button becomes Close');
+  assert.match(counterText(tree), /\d+ \/ 4000/);
+  field().props.onChange({ target: { value: 'edited in place' } }); rerender();
+  assert.match(counterText(tree), /15 \/ 4000/);
+  // Cancel discards
+  findAll(tree, n => n.host === 'DialogButton').find(b => b.props.children === 'Cancel').props.onClick(); rerender();
+  assert.equal(field(), undefined);
+  assert.equal(backendNotes['app:620'].text, original);
+  // Save writes the note
+  editBtn().props.onClick(); rerender();
+  field().props.onChange({ target: { value: 'edited in place' } }); rerender();
+  await findAll(tree, n => n.host === 'DialogButtonPrimary').find(b => b.props.children === 'Save').props.onClick(); await tick(); rerender();
+  assert.equal(backendNotes['app:620'].text, 'edited in place');
+  assert.equal(field(), undefined, 'the editor closes after saving');
+  assert.match(textOf(tree), /edited in place/);
+});
+
+
+await test('the native note editor opens over the best available window', async () => {
+  assert.equal(window.__moreNotes.openEditor('app:620', 'Portal 2'), true);
+  assert.equal(modalCalls.at(-1).win.id, 'SP Desktop_uid0');
+  assert.equal(modalCalls.at(-1).opts.strTitle, 'Note');
+  // the window the click came from is tried first
+  window.__moreNotes.openEditor('app:620', 'Portal 2', { view: { marker: 'click-window' } });
+  assert.equal(modalCalls.at(-1).win.marker, 'click-window');
+  // a parent that throws is skipped
+  const real = API.showModal;
+  API.showModal = (el, win, opts) => { if (win && win.marker === 'bad') throw new Error('refused'); return real(el, win, opts); };
+  assert.equal(window.__moreNotes.openEditor('app:620', 'Portal 2', { view: { marker: 'bad' } }), true);
+  assert.equal(modalCalls.at(-1).win.id, 'SP Desktop_uid0', 'fell back to the Library window');
+  API.showModal = () => { throw new Error('nothing works'); };
+  assert.equal(window.__moreNotes.openEditor('app:620', 'Portal 2'), false, 'reports failure when every parent refuses');
+  API.showModal = real;
 });
 
 await test('editor saves a changed note and closes', async () => {
-  const el = modalCalls[0].el;
+  const el = modalCalls.find(c => c.opts && c.opts.strTitle === 'Note').el;
   let closed = false;
   const editorProps = { ...el.props, closeModal: () => { closed = true; } };
-  // render the editor component with its own hook scope
   hookIndex = 0; currentPath = 'editor';
   const edTree = expand({ ...el, props: editorProps }, 'editor');
   const tf = findAll(edTree, n => n.host === 'TextField')[0];
@@ -249,11 +285,10 @@ await test('editor saves a changed note and closes', async () => {
   rerender();
 });
 
-const counterText = t => { let out = ''; walk(t, n => { if (n.host === 'NoteCounter') out += textOf(n); }); return out; };
 const counterNode = t => findAll(t, n => n.host === 'NoteCounter')[0];
 
 await test('note editor shows "current / maximum" beneath the writing area and clamps at the limit', async () => {
-  const el = modalCalls[0].el;
+  const el = modalCalls.find(c => c.opts && c.opts.strTitle === 'Note').el;
   const render = () => { hookIndex = 0; currentPath = 'edcount'; return expand({ ...el, props: { ...el.props, closeModal() {} } }, 'edcount'); };
   let t = render();
   const field = () => findAll(t, n => n.host === 'TextField')[0];
@@ -313,7 +348,7 @@ await test('settings section lists the tab options with defaults from the backen
   assert.equal(facing.props.description, 'Direction');
   const dd = findAll(facing, n => n.host === 'Dropdown')[0];
   assert.equal(dd.props.strDefaultLabel, 'Right edge');
-  assertSame(dd.props.rgOptions.map(o => o.label), ['Left edge', 'Right edge', 'Top edge', 'Bottom edge', 'Top-left corner', 'Top-right corner', 'Bottom-left corner', 'Bottom-right corner']);
+  assertSame(dd.props.rgOptions.map(o => o.label), ['Left edge', 'Right edge', 'Top edge', 'Bottom edge', 'Top-left corner', 'Top-right corner', 'Bottom-left corner', 'Bottom-right corner', 'Address bar']);
   assert.equal(findAll(labelRow('Notes tab on game pages'), n => n.host === 'Toggle')[0].props.value, false, 'the library Notes tab is off by default');
   assert.equal(findAll(labelRow('Also show a note line under titles'), n => n.host === 'Toggle')[0].props.value, false, 'the inline note line is off by default');
 });
@@ -407,6 +442,39 @@ await test('corners ignore the offset; the dot floats, every other shape bends t
   assert.ok(sliderByLabel('Up/down offset (all tabs)'), 'the offset slider returns for an edge');
 });
 
+await test('the Library tab has its own switch and status line', async () => {
+  assert.match(textOf(tree), /Show the tab in the Library/);
+  assert.equal(findAll(labelRow('Show the tab in the Library'), n => n.host === 'Toggle')[0].props.value, true, 'on by default');
+  assert.match(textOf(tree), /Library tab status\|main window not found/, 'the stub popup has no window, and the status says so');
+  findAll(labelRow('Show the tab in the Library'), n => n.host === 'Toggle')[0].props.onChange(false); rerender();
+  await wait(450);
+  assert.equal(backendSettings.libdock, false);
+  assert.doesNotMatch(textOf(tree), /Library tab status/, 'no status line while it is off');
+  findAll(labelRow('Show the tab in the Library'), n => n.host === 'Toggle')[0].props.onChange(true); rerender();
+  await wait(450);
+  assert.equal(backendSettings.libdock, true);
+});
+
+await test('choosing Address bar disables and hides the edge controls', () => {
+  const rows = () => ({ offset: sliderByLabel('Up/down offset (all tabs)') || sliderByLabel('Left/right offset (all tabs)'), cornerNote: labelRow('Offset (all tabs)'),
+    place: labelRow('Final location'), preview: findAll(tree, n => n.host === 'PlacementPreview')[0], size: labelRow('Size'), lib: labelRow('Show the tab in the Library'),
+    libStatus: labelRow('Library tab status'), shape: labelRow('Shape'), colour: labelRow('Colour'), bar: labelRow('Address bar button status') });
+  let r = rows(); assert.ok(r.offset && r.place && r.preview && r.size && r.lib && r.shape && r.colour); assert.equal(r.bar, undefined);
+  findAll(labelRow('Facing'), n => n.host === 'Dropdown')[0].props.onChange({ data: 8 }); rerender();
+  assert.equal(window.__moreNotes.store.settings.facing, 'addressbar');
+  assert.equal(findAll(labelRow('Facing'), n => n.host === 'Dropdown')[0].props.strDefaultLabel, 'Address bar');
+  r = rows();
+  assert.equal(r.offset, undefined, 'offset hidden'); assert.equal(r.cornerNote, undefined); assert.equal(r.place, undefined, 'final location hidden');
+  assert.equal(r.preview, undefined); assert.equal(r.size, undefined, 'size hidden');
+  assert.equal(r.lib, undefined, 'the Library edge tab is hidden too'); assert.equal(r.libStatus, undefined);
+  assert.ok(r.shape && r.colour, 'shape and colour still style the button');
+  assert.ok(r.bar && /main window not found/.test(r.bar.props.description), 'an address bar status line appears');
+  // and everything returns when an edge is chosen again
+  findAll(labelRow('Facing'), n => n.host === 'Dropdown')[0].props.onChange({ data: 0 }); rerender();
+  r = rows(); assert.ok(r.offset && r.place && r.preview && r.size && r.lib); assert.equal(r.bar, undefined);
+  setLook({ facing: 'left', shape: 'circle' });
+});
+
 await test('an older saved side is understood as the facing', async () => {
   backendSettings = { ...backendSettings, facing: undefined, side: 'right' };
   delete backendSettings.facing;
@@ -418,7 +486,7 @@ await test('an older saved side is understood as the facing', async () => {
   assert.equal(window.__moreNotes.store.settings.vertical, 17, 'offset survives a reload');
 });
 
-await test('colour is a short list of suggested colours; the custom panel appears only for Custom', async () => {
+await test('colour is a short list of suggested colours; Custom opens the colour box as its own window', async () => {
   const st = () => window.__moreNotes.store.settings;
   const colourDd = () => findAll(labelRow('Colour'), n => n.host === 'Dropdown')[0];
   assertSame(colourDd().props.rgOptions.map(o => o.label), ['Steam blue', 'Green', 'Orange', 'Purple', 'Pink', 'Red', 'Grey', 'Custom']);
@@ -426,47 +494,115 @@ await test('colour is a short list of suggested colours; the custom panel appear
   colourDd().props.onChange({ data: 4 }); rerender();           // Pink
   assert.equal(st().color, '#e0589b');
   assert.equal(colourDd().props.strDefaultLabel, 'Pink');
-  assert.doesNotMatch(textOf(tree), /Swatches|Custom colour|Icon colour/, 'no panel for a suggested colour');
-  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 1);
+  assert.doesNotMatch(textOf(tree), /Custom colour/);
+  const popups = modalCalls.length;
   colourDd().props.onChange({ data: 7 }); rerender();           // Custom
-  assert.equal(colourDd().props.strDefaultLabel, 'Custom');
+  assert.equal(modalCalls.length, popups + 1, 'a popup opened');
+  const call = modalCalls.at(-1);
+  assert.equal(call.el.type.name, 'ColourPicker');
+  assert.equal(call.opts.strTitle, 'Colour');
+  assert.equal(call.el.props.initial.color, '#e0589b');
   assert.equal(st().color, '#e0589b', 'choosing Custom keeps the current colour');
   assert.match(textOf(tree), /Custom colour/);
-  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 4, 'offset + hue + saturation + lightness');
-  assert.ok(findAll(tree, n => n.host === 'TabIcon').length >= 2, 'a small preview icon sits in the custom panel');
+  assert.ok(buttons().some(b => b.props.label === 'Open the colour box'), 'the box can be reopened');
+  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 1, 'nothing is drawn inline while the popup works');
+  // the popup mounts: no inline fallback
+  hookIndex = 0; currentPath = 'picker-mount'; expand(call.el, 'picker-mount'); effects.splice(0).forEach(fn => fn());
+  await wait(1300); rerender();
+  assert.doesNotMatch(textOf(tree), /did not open as its own window/);
+  colourDd().props.onChange({ data: 0 }); rerender();           // back to Steam blue
+  assert.equal(st().color, '#1a9fff');
+  assert.doesNotMatch(textOf(tree), /Custom colour/);
 });
 
-await test('custom colour panel: swatches, hue/saturation/lightness, hex field and icon colour', async () => {
+await test('if the colour popup never mounts, the box is shown inside the settings page instead', async () => {
   const st = () => window.__moreNotes.store.settings;
-  findAll(tree, n => n.host === 'Focusable' && n.props.title === '#2fbf71')[0].props.onClick(); rerender();
-  assert.equal(st().color, '#2fbf71');
-  sliderByLabel('Hue').props.onChange(200); rerender();
-  assert.match(st().color, /^#[0-9a-f]{6}$/);
-  assert.ok(Math.abs(hueOf(st().color) - 200) <= 2, 'hue follows the slider: ' + st().color);
-  const afterHue = st().color;
-  sliderByLabel('Lightness').props.onChange(30); rerender();
-  assert.notEqual(st().color, afterHue);
-  assert.equal(sliderByLabel('Hue').props.value, 200, 'hue is kept while other sliders move');
-  const hex = () => findAll(tree, n => n.host === 'TextField' && n.props.placeholder === '#1a9fff')[0];
-  hex().props.onChange({ target: { value: 'FF8800' } }); rerender();
-  assert.equal(st().color, '#ff8800');
-  hex().props.onChange({ target: { value: 'zz' } }); rerender();
-  assert.equal(st().color, '#ff8800');
-  assert.match(textOf(tree), /six hex digits/);
-  assert.ok(findAll(tree, n => n.host === 'Focusable' && n.props.title === '#ffffff')[0]);
-  findAll(labelRow('Icon colour'), n => n.host === 'Dropdown')[0].props.onChange({ data: 1 }); rerender();
-  assert.equal(st().iconcolor, 'light');
-  await wait(450);
-  assert.equal(backendSettings.color, '#ff8800');
-  assert.equal(backendSettings.iconcolor, 'light');
+  const colourDd = () => findAll(labelRow('Colour'), n => n.host === 'Dropdown')[0];
+  colourDd().props.onChange({ data: 7 }); rerender();           // Custom; showModal accepts but nothing ever mounts
+  await wait(1300); rerender();
+  assert.match(textOf(tree), /did not open as its own window/);
+  assert.equal(findAll(tree, n => n.host === 'ColourPicker').length, 1);
+  assert.equal(sliderByLabel('Red').props.value, 26, 'the inline box starts from the current colour (#1a9fff)');
+  await findAll(tree, n => n.host === 'DialogButton').find(b => b.props.children === 'Cancel').props.onClick(); rerender();
+  assert.equal(findAll(tree, n => n.host === 'ColourPicker').length, 0, 'Cancel closes it');
+  // when showModal refuses outright the box appears at once
+  const real = API.showModal; API.showModal = () => { throw new Error('refused'); };
+  colourDd().props.onChange({ data: 0 }); rerender();
+  colourDd().props.onChange({ data: 7 }); rerender();
+  assert.equal(findAll(tree, n => n.host === 'ColourPicker').length, 1, 'inline immediately when no popup can open');
+  API.showModal = real;
+  colourDd().props.onChange({ data: 0 }); rerender();
+  assert.equal(st().color, '#1a9fff');
 });
 
-await test('choosing a suggested colour again closes the custom panel', () => {
-  const colourDd = () => findAll(labelRow('Colour'), n => n.host === 'Dropdown')[0];
-  colourDd().props.onChange({ data: 0 }); rerender();           // Steam blue
-  assert.equal(window.__moreNotes.store.settings.color, '#1a9fff');
-  assert.doesNotMatch(textOf(tree), /Swatches|Custom colour|Icon colour/);
-  assert.equal(findAll(tree, n => n.host === 'SliderField').length, 1);
+await test('the colour box: square, hue, saturation, brightness, RGB, hex, a full palette and the icon colour', async () => {
+  const st = () => window.__moreNotes.store.settings;
+  st(); window.__moreNotes.store.saveSettings({ color: '#e0589b', iconcolor: 'auto' }); rerender();
+  assert.equal(window.__moreNotes.openColourPicker(undefined), true);
+  const el = modalCalls.at(-1).el;
+  let closed = 0;
+  const props = { ...el.props, closeModal: () => { closed++; } };
+  const render = path => { hookIndex = 0; currentPath = path; return expand({ ...el, props }, path); };
+  let t = render('cp');
+  const slider = label => findAll(t, n => n.host === 'SliderField' && n.props.label === label)[0];
+  const hexField = () => findAll(t, n => n.host === 'TextField')[0];
+  for (const l of ['Hue', 'Saturation', 'Brightness', 'Red', 'Green', 'Blue']) assert.ok(slider(l), l + ' slider');
+  assert.equal([slider('Red').props.value, slider('Green').props.value, slider('Blue').props.value].join(), '224,88,155', 'RGB match the colour exactly');
+  assert.equal(hexField().props.value, '#e0589b');
+  assert.match(textOf(t), /#e0589b   rgb\(224, 88, 155\)/);
+  const swatches = () => findAll(t, n => n.host === 'Focusable' && typeof n.props.title === 'string' && n.props.title.startsWith('#'));
+  assert.equal(swatches().length, 72, 'a 12 x 5 colour grid plus a row of 12 greys');
+  assert.equal(new Set(swatches().map(n => n.props.title)).size, 72, 'every swatch is a different colour');
+  // RGB
+  slider('Red').props.onChange(0); t = render('cp');
+  assert.equal(hexField().props.value, '#00589b');
+  slider('Blue').props.onChange(255); t = render('cp');
+  assert.equal(hexField().props.value, '#0058ff');
+  // hex
+  hexField().props.onChange({ target: { value: 'FF8800' } }); t = render('cp');
+  assert.equal([slider('Red').props.value, slider('Green').props.value, slider('Blue').props.value].join(), '255,136,0');
+  hexField().props.onChange({ target: { value: 'zz' } }); t = render('cp');
+  assert.match(textOf(t), /six hex digits/);
+  assert.equal(slider('Red').props.value, 255, 'an invalid hex changes nothing');
+  // palette
+  swatches()[0].props.onClick(); t = render('cp');
+  assert.equal(hexField().props.value, swatches()[0].props.title);
+  // saturation / brightness / hue sliders
+  hexField().props.onChange({ target: { value: '#2060c0' } }); t = render('cp');
+  slider('Saturation').props.onChange(0); t = render('cp');
+  assert.equal(slider('Saturation').props.value, 0);
+  slider('Brightness').props.onChange(50); t = render('cp');
+  assert.equal(hexField().props.value, '#808080', 'zero saturation is a grey');
+  slider('Hue').props.onChange(120); slider('Saturation').props.onChange(100); t = render('cp');
+  // the saturation/brightness square
+  const square = () => findAll(t, n => n.host === 'div' && typeof n.props.onMouseDown === 'function')[0];
+  const listeners = {};
+  const fakeDoc = { addEventListener: (type, fn) => { listeners[type] = fn; }, removeEventListener: type => { delete listeners[type]; } };
+  const evt = (x, y) => ({ clientX: x, clientY: y, preventDefault() {}, currentTarget: { ownerDocument: fakeDoc, getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) } });
+  square().props.onMouseDown(evt(100, 25)); t = render('cp');
+  assert.equal([slider('Saturation').props.value, slider('Brightness').props.value].join(), '50,75', 'clicking the square sets saturation and brightness');
+  assert.equal(slider('Hue').props.value, 120, 'hue is untouched by the square');
+  assert.ok(listeners.mousemove && listeners.mouseup, 'dragging is tracked');
+  listeners.mousemove({ clientX: 260, clientY: -30 }); t = render('cp');
+  assert.equal([slider('Saturation').props.value, slider('Brightness').props.value].join(), '100,100', 'dragging beyond the square is held at its edge');
+  listeners.mouseup(); assert.equal(Object.keys(listeners).length, 0, 'drag listeners are removed on release');
+  // icon colour + Use this colour
+  hexField().props.onChange({ target: { value: 'FF8800' } }); t = render('cp');
+  findAll(t, n => n.host === 'Dropdown')[0].props.onChange({ data: 2 }); t = render('cp');   // Dark
+  assert.equal(st().color, '#e0589b', 'nothing is applied until the button is pressed');
+  findAll(t, n => n.host === 'DialogButtonPrimary').find(b => b.props.children === 'Use this colour').props.onClick(); rerender();
+  assert.equal(st().color, '#ff8800'); assert.equal(st().iconcolor, 'dark'); assert.equal(closed, 1);
+  // Cancel discards
+  window.__moreNotes.openColourPicker(undefined);
+  const el2 = modalCalls.at(-1).el;
+  hookIndex = 0; currentPath = 'cp2'; t = expand({ ...el2, props: { ...el2.props, closeModal: () => { closed++; } } }, 'cp2');
+  findAll(t, n => n.host === 'TextField')[0].props.onChange({ target: { value: '00ff00' } });
+  hookIndex = 0; currentPath = 'cp2'; t = expand({ ...el2, props: { ...el2.props, closeModal: () => { closed++; } } }, 'cp2');
+  findAll(t, n => n.host === 'DialogButton').find(b => b.props.children === 'Cancel').props.onClick();
+  assert.equal(st().color, '#ff8800', 'Cancel keeps the colour'); assert.equal(closed, 2);
+  await wait(450);
+  assert.equal(backendSettings.color, '#ff8800'); assert.equal(backendSettings.iconcolor, 'dark');
+  window.__moreNotes.store.saveSettings({ color: '#1a9fff', iconcolor: 'auto' }); rerender();
 });
 
 await test('pill and inline toggles write through', async () => {
@@ -567,10 +703,10 @@ await test('only plain strings are ever sent to the backend', () => {
 });
 
 await test('invalid values from the backend are ignored on load', async () => {
-  backendSettings = { pill: 'yes', facing: 'sideways', side: 'top', vertical: 'abc', shape: 'star', size: 'huge', color: 'red', inline: 1, iconcolor: 'rainbow', libtab: 'no' };
+  backendSettings = { pill: 'yes', facing: 'sideways', side: 'top', vertical: 'abc', shape: 'star', size: 'huge', color: 'red', inline: 1, iconcolor: 'rainbow', libtab: 'no', libdock: 'maybe' };
   await window.__moreNotes.store.load();
   const st = window.__moreNotes.store.settings;
-  assert.equal(JSON.stringify(st), JSON.stringify({ pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false }));
+  assert.equal(JSON.stringify(st), JSON.stringify({ pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false, libdock: true }));
 });
 
 await test('settings write failure shows a message', async () => {

@@ -22,7 +22,7 @@
   var DEFAULTS = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, iconcolor: 'auto' };
   var settings = {};
   Object.keys(DEFAULTS).forEach(function (k) { settings[k] = DEFAULTS[k]; });
-  var ENUMS = { facing: ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
+  var ENUMS = { facing: ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright', 'addressbar'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
 
   function applySettings(a) {
     if (!a || typeof a !== 'object') return;
@@ -100,7 +100,7 @@
     for (var i = 0; i < all.length; i++) {
       if (!all[i].hasAttribute('data-morenotes-editing')) showView(all[i]);
     }
-    updatePillState();
+    if (dock) dock.refresh();
   }
 
   function showEdit(root, key, label) {
@@ -255,78 +255,21 @@
 
 
   // ------------------------------------------------------------------ pill
-  // A docked, expandable note handle for pages with one subject (a game or a profile).
-  // Lives in a shadow root so page CSS cannot restyle it.
-  var pill = null;
-  var ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4"/><path d="M8 12h8M8 16h6"/></svg>';
-  var SIZES = { small: { w: 26, h: 84, d: 40, tw: 22, c: 56 }, medium: { w: 32, h: 104, d: 48, tw: 26, c: 68 }, large: { w: 38, h: 124, d: 56, tw: 30, c: 80 } };
-  var PILL_CSS = [
-    ':host{all:initial}',
-    '.wrap{position:fixed;z-index:2147483000;font:12px/1.4 "Motiva Sans",Arial,Helvetica,sans-serif;color:#c6d4df}',
-    // left / right edges: the box opens beside the handle
-    '.wrap[data-edge=v]{display:flex;align-items:center;top:var(--pos);transform:translateY(-50%)}',
-    '.wrap[data-facing=right]{right:0;flex-direction:row-reverse}',
-    '.wrap[data-facing=left]{left:0;flex-direction:row}',
-    // top / bottom edges: the box opens below or above the handle
-    '.wrap[data-edge=h]{left:var(--pos);transform:translateX(-50%)}',
-    '.wrap[data-facing=top]{top:0}.wrap[data-facing=bottom]{bottom:0}',
-    '.wrap[data-edge=h] .panel{position:absolute;left:50%;margin:0;transform:translateX(calc(-1 * var(--pos)))}',
-    '.wrap[data-facing=top] .panel{top:100%;margin-top:6px}.wrap[data-facing=bottom] .panel{bottom:100%;margin-bottom:6px}',
-    // corners: the box opens inward from the corner
-    '.wrap[data-facing=topleft]{top:0;left:0}.wrap[data-facing=topright]{top:0;right:0}',
-    '.wrap[data-facing=bottomleft]{bottom:0;left:0}.wrap[data-facing=bottomright]{bottom:0;right:0}',
-    '.wrap[data-edge=c] .panel{position:absolute;margin:0}',
-    '.wrap[data-facing=topleft] .panel{top:100%;left:0;margin:6px 0 0 6px}.wrap[data-facing=topright] .panel{top:100%;right:0;margin:6px 6px 0 0}',
-    '.wrap[data-facing=bottomleft] .panel{bottom:100%;left:0;margin:0 0 6px 6px}.wrap[data-facing=bottomright] .panel{bottom:100%;right:0;margin:0 6px 6px 0}',
-    // handle shapes
-    '.wrap[data-edge=v][data-shape=pill] .handle{border-radius:999px;width:var(--w);height:var(--h)}',
-    '.wrap[data-edge=v][data-shape=tab] .handle{margin:0;width:var(--tw);height:var(--h)}',
-    '.wrap[data-edge=v][data-shape=tab][data-facing=right] .handle{border-radius:12px 0 0 12px}',
-    '.wrap[data-edge=v][data-shape=tab][data-facing=left] .handle{border-radius:0 12px 12px 0}',
-    '.wrap[data-edge=v][data-shape=square] .handle{border-radius:10px;width:var(--d);height:var(--d)}',
-    '.wrap[data-edge=h] .handle{margin:6px 0;flex-direction:row}',
-    '.wrap[data-edge=h] .lbl{writing-mode:horizontal-tb}',
-    '.wrap[data-edge=h][data-shape=pill] .handle{border-radius:999px;width:var(--h);height:var(--w)}',
-    '.wrap[data-edge=h][data-shape=tab] .handle{margin:0;width:var(--h);height:var(--tw)}',
-    '.wrap[data-edge=h][data-shape=tab][data-facing=top] .handle{border-radius:0 0 12px 12px}',
-    '.wrap[data-edge=h][data-shape=tab][data-facing=bottom] .handle{border-radius:12px 12px 0 0}',
-    '.wrap[data-edge=h][data-shape=square] .handle{border-radius:10px;width:var(--d);height:var(--d)}',
-    // the dot (circle) is a dot everywhere; any other shape in a corner bends to follow the corner
-    '.wrap[data-shape=circle] .handle{border-radius:50%;width:var(--d);height:var(--d)}',
-    '.wrap[data-edge=c] .handle{margin:0;width:var(--cs);height:var(--cs);padding:calc(var(--cs) * .2);--r:18px}',
-    '.wrap[data-edge=c][data-shape=pill] .handle{--r:100%}',
-    '.wrap[data-edge=c][data-shape=square] .handle{--r:12px}',
-    '.wrap[data-edge=c][data-shape=circle] .handle{margin:6px;padding:0;width:var(--d);height:var(--d);border-radius:50%}',
-    '.wrap[data-facing=topleft]:not([data-shape=circle]) .handle{border-radius:0 0 var(--r) 0;align-items:flex-start;justify-content:flex-start}',
-    '.wrap[data-facing=topright]:not([data-shape=circle]) .handle{border-radius:0 0 0 var(--r);align-items:flex-end;justify-content:flex-start}',
-    '.wrap[data-facing=bottomleft]:not([data-shape=circle]) .handle{border-radius:0 var(--r) 0 0;align-items:flex-start;justify-content:flex-end}',
-    '.wrap[data-facing=bottomright]:not([data-shape=circle]) .handle{border-radius:var(--r) 0 0 0;align-items:flex-end;justify-content:flex-end}',
-    '.wrap[data-edge=c] .lbl{display:none}',
-    '.handle{box-sizing:border-box;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;border:0;padding:0;margin:0 6px;background:var(--c);color:var(--fg);font:inherit;opacity:.82;box-shadow:0 2px 10px rgba(0,0,0,.45);transition:opacity .15s}',
-    '.handle:hover,.wrap[data-open=true] .handle{opacity:1}',
-    '.wrap[data-has=true] .handle{opacity:1;box-shadow:0 0 0 2px rgba(255,255,255,.35),0 2px 14px rgba(0,0,0,.5)}',
-    '.lbl{writing-mode:vertical-rl;font-weight:600;font-size:11px;letter-spacing:.08em;text-transform:uppercase}',
-    '.dot{display:none;position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px var(--c)}',
-    '.wrap[data-has=true] .dot{display:block}',
-    '.wrap[data-shape=circle] .lbl,.wrap[data-shape=square] .lbl{display:none}',
-    '.panel{display:none;box-sizing:border-box;width:min(300px,70vw);margin:0 6px;padding:10px;background:#1b2838;border:1px solid var(--c);border-radius:var(--pr);box-shadow:0 6px 24px rgba(0,0,0,.55)}',
-    '.wrap[data-open=true] .panel{display:block}',
-    '.title{color:#fff;font-weight:600;border-left:3px solid var(--c);padding-left:8px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-    'textarea{display:block;box-sizing:border-box;width:100%;min-height:96px;padding:6px;margin:0 0 8px;background:rgba(0,0,0,.35);color:#fff;border:1px solid #3a4a5c;border-radius:3px;font:inherit;resize:vertical}',
-    'textarea:focus{outline:none;border-color:var(--c)}',
-    '.actions{display:flex;gap:8px}',
-    'button.act{flex:1;cursor:pointer;border:0;border-radius:3px;padding:6px 8px;background:#2a3f55;color:#c6d4df;font:inherit}',
-    'button.act:hover{background:#355070}',
-    'button.primary{background:var(--c);color:var(--fg)}',
-    'button.primary:hover{background:var(--c);filter:brightness(1.12)}',
-    '.count{text-align:right;font-size:11px;opacity:.75;margin:-4px 0 8px}',
-    '.count.warn{color:#e8b24a;opacity:1}.count.full{color:#e24c4c;opacity:1}',
-    '.err{color:#e24c4c;margin-top:6px}'
-  ].join('');
+  // The docked note tab itself is shared with the Library overlay in the client (shared/dock.js).
+  /* @shared:dock */
 
-  function contrastColor(hex) {
-    var r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#101820' : '#ffffff';
+  var dock = null;
+  function getDock() {
+    if (!dock) {
+      dock = createDock({
+        id: 'morenotes-pill',
+        doc: document,
+        settings: function () { return settings; },
+        saved: function (key) { var n = notes[key]; return (n && n.text) || ''; },
+        save: saveNote
+      });
+    }
+    return dock;
   }
 
   function saveNote(key, text, label, cb) {
@@ -339,114 +282,6 @@
       }
       cb(r);
     }, function (e) { cb({ ok: false, error: 'backend_unreachable', detail: e && e.message ? e.message : String(e) }); });
-  }
-
-  function pillSaved() { var n = pill && notes[pill.key]; return (n && n.text) || ''; }
-
-  function setPillOpen(open) {
-    if (!pill) return;
-    pill.open = open;
-    pill.wrap.setAttribute('data-open', open ? 'true' : 'false');
-    pill.err.textContent = '';
-    if (open) {
-      pill.ta.value = pillSaved();
-      paintCount(pill.count, pill.ta.value);
-      pill.del.style.display = pillSaved() ? '' : 'none';
-      pill.ta.focus();
-    }
-  }
-
-  function closePill(save) {
-    if (!pill || !pill.open) return;
-    var text = pill.ta.value;
-    if (save && text.trim() !== pillSaved().trim()) {
-      saveNote(pill.key, text, pill.label, function (r) {
-        if (!r.ok) { pill.err.textContent = (r.error || 'failed') + (r.detail ? ': ' + r.detail : ''); return; }
-        setPillOpen(false);
-      });
-      return;
-    }
-    setPillOpen(false);
-  }
-
-  function updatePillState() {
-    if (!pill) return;
-    var saved = pillSaved();
-    pill.wrap.setAttribute('data-has', saved ? 'true' : 'false');
-    pill.handle.title = saved ? saved : 'Add a private note';
-    if (!pill.open) { pill.ta.value = saved; paintCount(pill.count, saved); }
-  }
-
-  function applyPillSettings() {
-    if (!pill) return;
-    var sz = SIZES[settings.size] || SIZES.medium;
-    var pos = Math.max(8, Math.min(92, settings.vertical));
-    var f = settings.facing;
-    var edge = (f === 'left' || f === 'right') ? 'v' : (f === 'top' || f === 'bottom') ? 'h' : 'c';
-    var w = pill.wrap;
-    w.setAttribute('data-facing', f);
-    w.setAttribute('data-edge', edge);
-    w.setAttribute('data-shape', settings.shape);
-    w.style.setProperty('--pos', pos + '%');
-    w.style.setProperty('--cs', sz.c + 'px');
-    w.style.setProperty('--c', settings.color);
-    w.style.setProperty('--fg', settings.iconcolor === 'light' ? '#ffffff' : settings.iconcolor === 'dark' ? '#101820' : contrastColor(settings.color));
-    w.style.setProperty('--w', sz.w + 'px');
-    w.style.setProperty('--h', sz.h + 'px');
-    w.style.setProperty('--d', sz.d + 'px');
-    w.style.setProperty('--tw', sz.tw + 'px');
-    w.style.setProperty('--pr', settings.shape === 'square' ? '10px' : settings.shape === 'tab' ? '12px' : '18px');
-  }
-
-  function buildPill() {
-    var host = document.createElement('div');
-    host.id = 'morenotes-pill';
-    var root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = '<style>' + PILL_CSS + '</style>' +
-      '<div class="wrap" data-open="false" data-has="false">' +
-      '<button class="handle" type="button"><span class="dot"></span>' + ICON + '<span class="lbl">Notes</span></button>' +
-      '<div class="panel"><div class="title"></div><textarea placeholder="Private note"></textarea><div class="count">0 / ' + MAX_NOTE + '</div>' +
-      '<div class="actions"><button class="act del" type="button">Delete</button><button class="act primary done" type="button">Done</button></div>' +
-      '<div class="err"></div></div></div>';
-    pill = {
-      host: host, wrap: root.querySelector('.wrap'), handle: root.querySelector('.handle'), title: root.querySelector('.title'),
-      ta: root.querySelector('textarea'), count: root.querySelector('.count'), err: root.querySelector('.err'), del: root.querySelector('.del'),
-      key: '', label: '', open: false
-    };
-    pill.handle.addEventListener('click', function () { if (pill.open) closePill(true); else setPillOpen(true); });
-    pill.root = root;
-    root.querySelector('.done').addEventListener('click', function () { closePill(true); });
-    pill.del.addEventListener('click', function () {
-      saveNote(pill.key, '', pill.label, function (r) {
-        if (!r.ok) { pill.err.textContent = (r.error || 'failed') + (r.detail ? ': ' + r.detail : ''); return; }
-        pill.ta.value = '';
-        paintCount(pill.count, '');
-        setPillOpen(false);
-      });
-    });
-    ['keydown', 'keyup', 'keypress'].forEach(function (t) {
-      pill.ta.addEventListener(t, function (e) {
-        e.stopPropagation();
-        if (t !== 'keydown') return;
-        if (e.key === 'Escape') closePill(true);
-        else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); closePill(true); }
-      });
-    });
-    pill.ta.addEventListener('input', function () {
-      var c = clampNote(pill.ta.value);
-      if (c !== pill.ta.value) pill.ta.value = c;
-      paintCount(pill.count, pill.ta.value);
-    });
-    document.addEventListener('mousedown', function (e) {
-      if (pill && pill.open && (e.composedPath ? e.composedPath().indexOf(pill.host) < 0 : true)) closePill(true);
-    }, true);
-    document.documentElement.appendChild(host);
-  }
-
-  function removePill() {
-    if (!pill) return;
-    if (pill.host.parentNode) pill.host.parentNode.removeChild(pill.host);
-    pill = null;
   }
 
   // Pages with no single game or person (store front page, search, wishlist, friend lists...) get a note of their own,
@@ -477,18 +312,10 @@
   }
 
   function scanPill() {
-    var s = subject();
-    if (!settings.pill || !s) { removePill(); return; }
-    if (!pill || !pill.host.isConnected) { pill = null; buildPill(); }
-    if (pill.key !== s.key) {
-      pill.key = s.key;
-      setPillOpen(false);
-    }
-    pill.label = s.label;
-    var kind = s.key.split(':')[0], rest = s.key.slice(kind.length + 1);
-    pill.title.textContent = s.label || (kind === 'app' ? 'Game ' + rest : kind === 'user' ? 'Person ' + rest : rest);
-    applyPillSettings();
-    updatePillState();
+    var sub = subject();
+    // the address-bar option replaces the edge tab on web pages (the client puts its button in the address bar)
+    if (!settings.pill || settings.facing === 'addressbar' || !sub) { if (dock) dock.hide(); return; }
+    getDock().show(sub);
   }
 
   function removeInlineSubjects() {

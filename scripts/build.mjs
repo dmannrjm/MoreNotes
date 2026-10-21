@@ -13,6 +13,9 @@ const outIdx = args.indexOf('--out');
 const outDir = outIdx >= 0 ? args[outIdx + 1] : join(root, '.millennium', 'Dist');
 const manifest = JSON.parse(readFileSync(join(root, 'plugin.json'), 'utf8'));
 let body = ['index.js'].map(f => readFileSync(join(root, 'frontend', f), 'utf8')).join('\n');
+// Shared source blocks: `/* @shared:dock */` in a source file is replaced by the contents of shared/dock.js.
+const shared = src => src.replace('/* @shared:dock */', () => readFileSync(join(root, 'shared', 'dock.js'), 'utf8'));
+body = shared(body);
 const flag = 'const SHOW_DIAGNOSTICS = true; // @build:diagnostics';
 if (!body.includes(flag)) throw new Error('diagnostics build flag not found in frontend/index.js');
 if (release) body = body.replace(flag, 'const SHOW_DIAGNOSTICS = false;');
@@ -36,7 +39,7 @@ const webkitSource = join(root, 'webkit', 'index.js');
 if (existsSync(webkitSource)) {
   const web =
     `const MILLENNIUM_IS_CLIENT_MODULE=!1,pluginName=${JSON.stringify(name)};\n` +
-    `try{\n${readFileSync(webkitSource, 'utf8')}\n}catch(e){console.error("[${name}] webkit failed",e)}\n`;
+    `try{\n${shared(readFileSync(webkitSource, 'utf8'))}\n}catch(e){console.error("[${name}] webkit failed",e)}\n`;
   writeFileSync(join(outDir, 'webkit.js'), web);
   console.log(`built ${name} ${manifest.version} -> ${outDir}/webkit.js (${web.length} bytes)`);
 }

@@ -1,6 +1,6 @@
 // More Notes frontend (classic packaging). `React` and `API` are provided by the build wrapper.
 const PLUGIN = 'MoreNotes';
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const SHOW_DIAGNOSTICS = true; // @build:diagnostics
 const h = React.createElement;
 
@@ -35,8 +35,8 @@ const MAX_NOTE = 4000; // characters; the backend enforces the same limit
 const cpLen = s => Array.from(String(s || '')).length; // code points, so an emoji counts once like the backend counts it
 const clampNote = s => { const a = Array.from(String(s || '')); return a.length > MAX_NOTE ? a.slice(0, MAX_NOTE).join('') : String(s || ''); };
 
-const DEFAULT_SETTINGS = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false };
-const ENUM_VALUES = { facing: ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
+const DEFAULT_SETTINGS = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false, libdock: true };
+const ENUM_VALUES = { facing: ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright', 'addressbar'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
 
 function mergeSettings(base, incoming) {
   const out = { ...base };
@@ -45,6 +45,7 @@ function mergeSettings(base, incoming) {
   if (typeof incoming.inline === 'boolean') out.inline = incoming.inline;
   if (typeof incoming.backup === 'boolean') out.backup = incoming.backup;
   if (typeof incoming.libtab === 'boolean') out.libtab = incoming.libtab;
+  if (typeof incoming.libdock === 'boolean') out.libdock = incoming.libdock;
   if (typeof incoming.backupdir === 'string') out.backupdir = incoming.backupdir.slice(0, 240);
   for (const k of Object.keys(ENUM_VALUES)) if (ENUM_VALUES[k].includes(incoming[k])) out[k] = incoming[k];
   if (incoming.facing === undefined && (incoming.side === 'left' || incoming.side === 'right')) out.facing = incoming.side; // older versions
@@ -245,16 +246,180 @@ function NoteEditor(props) {
         btn('cancel', 'Cancel', close, DialogButton))));
 }
 
-function openEditor(noteKey, label) {
-  const element = h(NoteEditor, { noteKey, label: label || '' });
-  const options = { strTitle: 'Note', popupWidth: 560, popupHeight: 300, bNeverPopOut: false };
+// The window the settings page is drawn in (captured from a ref); popups are opened over it.
+let uiWindow = null;
+const captureWindow = el => { try { if (el && el.ownerDocument && el.ownerDocument.defaultView) uiWindow = el.ownerDocument.defaultView; } catch (e) { /* ignore */ } };
+
+// Windows a popup may be parented to, best first: the window the click came from, the settings window,
+// the Library window, then none.
+function parentWindows(event) {
+  const out = [];
   try {
-    const win = window.g_PopupManager && window.g_PopupManager.GetExistingPopup && window.g_PopupManager.GetExistingPopup('SP Desktop_uid0');
-    if (win) return API.showModal(element, win, options);
-  } catch (e) { console.warn(`[${PLUGIN}] showModal with library window failed`, e); }
-  return API.showModal(element, undefined, options);
+    const t = event && (event.currentTarget || event.target);
+    const w = (event && event.view) || (t && t.ownerDocument && t.ownerDocument.defaultView);
+    if (w) out.push(w);
+  } catch (e) { /* ignore */ }
+  if (uiWindow) out.push(uiWindow);
+  try {
+    const p = window.g_PopupManager && window.g_PopupManager.GetExistingPopup && window.g_PopupManager.GetExistingPopup('SP Desktop_uid0');
+    if (p) { if (p.window) out.push(p.window); out.push(p); }
+  } catch (e) { /* ignore */ }
+  out.push(undefined);
+  return out;
 }
 
+// Opens a native Steam popup; tries each parent window until one accepts. Returns false if none did.
+function openPopup(element, options, event) {
+  for (const parent of parentWindows(event)) {
+    try { API.showModal(element, parent, options); return true; } catch (e) { console.warn(`[${PLUGIN}] showModal failed for one parent window`, e); }
+  }
+  return false;
+}
+
+function openEditor(noteKey, label, event) {
+  return openPopup(h(NoteEditor, { noteKey, label: label || '' }), { strTitle: 'Note', popupWidth: 600, popupHeight: 420, bNeverPopOut: false }, event);
+}
+
+// ---------------------------------------------------------------------------
+// The docked note tab (shared with the web-page script) and the address-bar button, drawn in the client's main window
+// ---------------------------------------------------------------------------
+/* @shared:dock */
+
+function mainWindowDoc() {
+  try {
+    const p = window.g_PopupManager && window.g_PopupManager.GetExistingPopup && window.g_PopupManager.GetExistingPopup('SP Desktop_uid0');
+    if (!p) return null;
+    const w = p.window || (p.m_popup && p.m_popup.window) || p.m_popup || null;
+    return (w && w.document && typeof w.document.querySelector === 'function') ? w.document : null;
+  } catch (e) { return null; }
+}
+
+// The Library tab: the same docked tab, drawn over the Library window, holding a Library-wide note.
+// Hidden while a web page is showing (the page has its own tab) and when the address-bar option is chosen.
+const libdock = {
+  timer: 0, dock: null, doc: null, unsub: null, status: 'starting',
+  setStatus(text) { if (this.status !== text) { this.status = text; store.emit(); } },
+  drop() { if (this.dock) { this.dock.hide(); this.dock = null; } this.doc = null; },
+  tick() {
+    try {
+      const st = store.settings;
+      const doc = mainWindowDoc();
+      if (!doc) { this.drop(); return this.setStatus('main window not found'); }
+      if (!st.libdock || !st.pill) { this.drop(); return this.setStatus('turned off'); }
+      if (st.facing === 'addressbar') { this.drop(); return this.setStatus('hidden: the address bar option is selected'); }
+      const bar = doc.querySelector('.URLBar');
+      if (bar && bar.getBoundingClientRect && bar.getBoundingClientRect().width > 0) { this.drop(); return this.setStatus('hidden: a web page is showing (it has its own tab)'); }
+      if (!this.dock || this.doc !== doc) {
+        this.drop();
+        this.doc = doc;
+        this.dock = createDock({
+          id: 'morenotes-library-dock', doc,
+          settings: () => store.settings,
+          saved: key => { const n = store.get(key); return (n && n.text) || ''; },
+          save: (key, text, label, cb) => { store.save(key, text, label).then(cb); },
+        });
+      }
+      this.dock.show({ key: 'page:library', label: 'Library' });
+      this.setStatus('showing');
+    } catch (e) { this.setStatus('error: ' + String((e && e.message) || e).slice(0, 80)); }
+  },
+  start() {
+    if (this.timer) return;
+    this.tick();
+    this.timer = setInterval(() => this.tick(), 1000);
+    this.unsub = store.subscribe(() => { if (this.dock) this.dock.refresh(); });
+  },
+  stop() {
+    clearInterval(this.timer); this.timer = 0;
+    if (this.unsub) { this.unsub(); this.unsub = null; }
+    this.drop();
+  },
+};
+
+// The address-bar option: instead of an edge tab, a note button beside the address bar of the client's web pages.
+// Reads the address shown in the bar (the page itself is a separate view) and opens the native note editor.
+const urlbar = {
+  timer: 0, status: 'starting', btn: null, sig: '', subject: null, unsub: null,
+  parse(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    let u;
+    try { u = new URL(/^https?:/i.test(raw) ? raw : 'https://' + raw); } catch (e) { return null; }
+    const host = u.hostname.toLowerCase();
+    if (!NOTE_HOSTS.includes(host)) return null;
+    let m = u.pathname.match(/^\/app\/(\d+)/);
+    if (m) return { key: 'app:' + m[1], label: appNameOf(m[1]) };
+    m = u.pathname.match(/^\/profiles\/(\d{17})/);
+    if (m) return { key: 'user:' + m[1], label: '' };
+    if (/^\/id\/[^/]+\/?$/.test(u.pathname)) return null; // a vanity profile address carries no SteamID
+    if (EXCLUDED_PATHS.test(u.pathname)) return null;
+    return { key: 'page:' + pagePathId(host, u.pathname), label: '' };
+  },
+  setStatus(text) { if (this.status !== text) { this.status = text; store.emit(); } },
+  remove() { if (this.btn && this.btn.parentNode) this.btn.parentNode.removeChild(this.btn); this.btn = null; this.sig = ''; },
+  make(doc) {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.id = 'morenotes-urlbtn';
+    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); if (urlbar.subject) openEditor(urlbar.subject.key, urlbar.subject.label, e); });
+    return b;
+  },
+  paint() {
+    const st = store.settings;
+    const note = this.subject && store.get(this.subject.key);
+    const has = !!(note && note.text);
+    const sig = [st.color, st.shape, st.iconcolor, has, this.subject.key].join('|');
+    this.btn.title = has ? note.text : 'Add a private note';
+    if (sig === this.sig) return;
+    this.sig = sig;
+    const radius = st.shape === 'circle' ? '50%' : st.shape === 'square' ? '5px' : st.shape === 'tab' ? '4px 11px 11px 4px' : '999px';
+    const iconOnly = st.shape === 'circle';
+    this.btn.style.cssText = [
+      'display:inline-flex', 'align-items:center', 'justify-content:center', 'gap:5px', 'height:22px', 'box-sizing:border-box',
+      iconOnly ? 'width:22px;padding:0' : 'padding:0 9px', 'margin:0 6px', 'border:0', 'cursor:pointer', 'position:relative',
+      `border-radius:${radius}`, `background:${st.color}`, `color:${iconFg(st)}`, `opacity:${has ? 1 : 0.8}`,
+      'font:600 11px "Motiva Sans",Arial,sans-serif', '-webkit-app-region:no-drag', 'app-region:no-drag',
+      has ? 'box-shadow:0 0 0 2px rgba(255,255,255,.4)' : '',
+    ].join(';');
+    this.btn.innerHTML =
+      '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4"/><path d="M8 12h8M8 16h6"/></svg>' +
+      (iconOnly ? '' : '<span>Note</span>') +
+      (has ? '<span style="position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px ' + st.color + '"></span>' : '');
+  },
+  tick() {
+    try {
+      const st = store.settings;
+      const doc = mainWindowDoc();
+      if (!doc) { this.remove(); this.subject = null; return this.setStatus('main window not found'); }
+      if (st.facing !== 'addressbar' || !st.pill) { this.remove(); this.subject = null; return this.setStatus('not selected'); }
+      const bar = doc.querySelector('.URLBar');
+      if (!bar) { this.remove(); this.subject = null; return this.setStatus('address bar not found (not on a web page?)'); }
+      const urlEl = doc.querySelector('.URLBar .URL');
+      const text = urlEl ? urlEl.textContent : '';
+      this.subject = this.parse(text);
+      if (!this.subject) { this.remove(); return this.setStatus('no note button for this address' + (text ? ` (${String(text).slice(0, 60)})` : '')); }
+      if (!this.btn || !this.btn.isConnected || this.btn.ownerDocument !== doc) {
+        this.remove();
+        this.btn = this.make(doc);
+        const anchor = bar.querySelector('.extensions-bar-container');
+        if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(this.btn, anchor); else bar.appendChild(this.btn);
+      }
+      this.paint();
+      this.setStatus('showing for ' + this.subject.key);
+    } catch (e) { this.setStatus('error: ' + String((e && e.message) || e).slice(0, 80)); }
+  },
+  start() {
+    if (this.timer) return;
+    this.tick();
+    this.timer = setInterval(() => this.tick(), 1000);
+    this.unsub = store.subscribe(() => { if (this.btn && this.subject) this.tick(); });
+  },
+  stop() {
+    clearInterval(this.timer); this.timer = 0;
+    if (this.unsub) { this.unsub(); this.unsub = null; }
+    this.remove();
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Shared hook into React's JSX runtime (used by the Notes tab and the optional diagnostics)
@@ -273,6 +438,7 @@ const jsxHooks = {
   },
   ensure() {
     if (this.watchdog) return true;
+    if (typeof API.findModuleByExport !== 'function' || typeof API.beforePatch !== 'function') { console.warn(`[${PLUGIN}] patch helpers unavailable`); return false; }
     this.runtime = API.findModuleByExport((value, name) => (name === 'jsx' || name === 'jsxs') && typeof value === 'function');
     if (!this.runtime) { console.warn(`[${PLUGIN}] jsx runtime not found`); return false; }
     const patch = name => {
@@ -414,8 +580,9 @@ const FACING_OPTIONS = [
   { data: 2, value: 'top', label: 'Top edge' }, { data: 3, value: 'bottom', label: 'Bottom edge' },
   { data: 4, value: 'topleft', label: 'Top-left corner' }, { data: 5, value: 'topright', label: 'Top-right corner' },
   { data: 6, value: 'bottomleft', label: 'Bottom-left corner' }, { data: 7, value: 'bottomright', label: 'Bottom-right corner' },
+  { data: 8, value: 'addressbar', label: 'Address bar' },
 ];
-const edgeOf = f => (f === 'left' || f === 'right') ? 'v' : (f === 'top' || f === 'bottom') ? 'h' : 'c';
+const edgeOf = f => f === 'addressbar' ? 'a' : (f === 'left' || f === 'right') ? 'v' : (f === 'top' || f === 'bottom') ? 'h' : 'c';
 const SIZE_DIMS = { small: { w: 26, h: 84, d: 40, tw: 22, c: 56 }, medium: { w: 32, h: 104, d: 48, tw: 26, c: 68 }, large: { w: 38, h: 124, d: 56, tw: 30, c: 80 } };
 const COLOUR_PRESETS = [
   { data: 0, label: 'Steam blue', hex: '#1a9fff' }, { data: 1, label: 'Green', hex: '#5ba32b' }, { data: 2, label: 'Orange', hex: '#e8863a' },
@@ -463,7 +630,8 @@ const noteIcon = (size, color) => h('svg', { width: size, height: size, viewBox:
 
 // Geometry of the collapsed tab for a facing: an edge tab, or (for any shape except the dot) a corner piece that bends
 // to follow the corner. Same shapes and sizes as on the pages.
-function tabStyle(st, k) {
+function tabStyle(rawSt, k) {
+  const st = rawSt.facing === 'addressbar' ? { ...rawSt, facing: 'right' } : rawSt; // previews of the address-bar button use the edge tab look
   const d = SIZE_DIMS[st.size] || SIZE_DIMS.medium;
   const edge = edgeOf(st.facing);
   const base = { background: st.color, color: iconFg(st), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,.45)', boxSizing: 'border-box' };
@@ -508,66 +676,135 @@ function PlacementPreview(props) {
     h('div', { style: placementStyle(st) }, h(TabIcon, { st, scale: 0.7 })));
 }
 
-// Small panel shown only when "Custom" is chosen: swatches, hue / saturation / lightness, hex, icon colour.
-function CustomColourPanel() {
-  useStore();
-  const st = store.settings;
-  const [hsl, setHsl] = React.useState(null);
+// ---- colour conversions for the picker
+const clamp255 = v => Math.max(0, Math.min(255, Math.round(v)));
+const hexToRgb = hex => ({ r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16), b: parseInt(hex.slice(5, 7), 16) });
+const rgbToHex = (r, g, b) => '#' + [r, g, b].map(x => clamp255(x).toString(16).padStart(2, '0')).join('');
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let hue = 0;
+  if (d) { hue = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; hue *= 60; if (hue < 0) hue += 360; }
+  return { h: hue % 360, s: mx ? d / mx : 0, v: mx }; // hue kept exact so a colour survives the round trip
+}
+function hsvToRgb(hue, sat, val) {
+  const c = val * sat, x = c * (1 - Math.abs(((hue / 60) % 2) - 1)), m = val - c;
+  let rgb;
+  if (hue < 60) rgb = [c, x, 0]; else if (hue < 120) rgb = [x, c, 0]; else if (hue < 180) rgb = [0, c, x];
+  else if (hue < 240) rgb = [0, x, c]; else if (hue < 300) rgb = [x, 0, c]; else rgb = [c, 0, x];
+  return { r: (rgb[0] + m) * 255, g: (rgb[1] + m) * 255, b: (rgb[2] + m) * 255 };
+}
+// Every shade the picker offers as a one-click swatch: 12 hues x 5 lightness levels, plus a row of greys.
+const PALETTE = [
+  ...[82, 68, 54, 40, 26].flatMap(l => Array.from({ length: 12 }, (_, i) => hslToHex(i * 30, 85, l))),
+  ...Array.from({ length: 12 }, (_, i) => hslToHex(0, 0, Math.round(4 + i * 8.5))),
+];
+
+// The colour box: a saturation/brightness square, hue, RGB and hex, a full palette and the icon colour.
+// Opens as its own popup; if the popup cannot open, the settings page shows it inline instead.
+function ColourPicker(props) {
+  const [hsv, setHsv] = React.useState(() => { const c = hexToRgb(props.initial.color); return rgbToHsv(c.r, c.g, c.b); });
+  const [icon, setIcon] = React.useState(props.initial.iconcolor);
   const [hexText, setHexText] = React.useState(null);
-  const cur = hsl && hslToHex(hsl.h, hsl.s, hsl.l) === st.color ? hsl : hexToHsl(st.color);
-  const setColour = hex => { setHsl(null); setHexText(null); store.saveSettings({ color: hex }); };
-  const setHslPart = (part, v) => {
-    const next = { ...cur, [part]: v };
-    setHsl(next); setHexText(null);
-    store.saveSettings({ color: hslToHex(next.h, next.s, next.l) });
-  };
-  const shownHex = hexText === null ? st.color : hexText;
+  React.useEffect(() => { if (props.onMounted) props.onMounted(); }, []);
+  const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+  const r = clamp255(rgb.r), g = clamp255(rgb.g), b = clamp255(rgb.b);
+  const hex = rgbToHex(r, g, b);
+  const shownHex = hexText === null ? hex : hexText;
   const hexValid = /^#?[0-9a-fA-F]{6}$/.test(shownHex);
-  const swatch = hex => {
-    const pick = () => setColour(hex);
-    return h(Focusable, {
-      key: hex, onActivate: pick, onClick: pick, title: hex,
-      style: { width: 28, height: 28, borderRadius: 6, background: hex, cursor: 'pointer', boxSizing: 'border-box', border: hex === st.color ? '2px solid #fff' : '1px solid rgba(255,255,255,.28)' },
-    });
+  const keepHue = (next, hue) => (next.s === 0 ? { ...next, h: hue } : next);
+  const setFromRgb = (nr, ng, nb) => { setHsv(prev => keepHue(rgbToHsv(nr, ng, nb), prev.h)); setHexText(null); };
+  const setFromHex = value => { const c = hexToRgb(value); setHsv(prev => keepHue(rgbToHsv(c.r, c.g, c.b), prev.h)); setHexText(null); };
+  const part = (name, v) => { setHsv(prev => ({ ...prev, [name]: v })); setHexText(null); };
+  const close = () => { if (props.closeModal) props.closeModal(); };
+
+  const dragSquare = e => {
+    const el = e.currentTarget, doc = el.ownerDocument;
+    const move = ev => {
+      const box = el.getBoundingClientRect();
+      const s1 = Math.max(0, Math.min(1, (ev.clientX - box.left) / box.width));
+      const v1 = 1 - Math.max(0, Math.min(1, (ev.clientY - box.top) / box.height));
+      setHsv(prev => ({ h: prev.h, s: s1, v: v1 })); setHexText(null);
+    };
+    const up = () => { doc.removeEventListener('mousemove', move); doc.removeEventListener('mouseup', up); };
+    if (e.preventDefault) e.preventDefault();
+    move(e);
+    doc.addEventListener('mousemove', move); doc.addEventListener('mouseup', up);
   };
-  const iconIdx = Math.max(0, ICON_OPTIONS.findIndex(o => o.value === st.iconcolor));
-  return h('div', { style: { margin: '4px 0 10px 12px', paddingLeft: 12, borderLeft: '2px solid var(--gpColor-Blue, #1a9fff)', display: 'flex', flexDirection: 'column' } },
-    h(Field, { label: 'Custom colour' }, h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } }, h(TabIcon, { st, scale: 0.6 }), h('span', { style: { opacity: 0.75, fontSize: 12 } }, st.color))),
-    h(Field, { label: 'Swatches' }, h(Focusable, { style: { display: 'flex', flexWrap: 'wrap', gap: 8, maxWidth: 300, justifyContent: 'flex-end' } }, SWATCHES.map(swatch))),
-    h(SliderField, { label: 'Hue', value: cur.h, min: 0, max: 360, step: 1, showValue: true, onChange: v => setHslPart('h', v) }),
-    h(SliderField, { label: 'Saturation', value: cur.s, min: 0, max: 100, step: 1, showValue: true, valueSuffix: '%', onChange: v => setHslPart('s', v) }),
-    h(SliderField, { label: 'Lightness', value: cur.l, min: 5, max: 95, step: 1, showValue: true, valueSuffix: '%', onChange: v => setHslPart('l', v) }),
-    h(TextField, {
-      value: shownHex, placeholder: '#1a9fff',
-      onChange: e => {
-        const raw = e.target.value.trim();
-        setHexText(raw);
-        const hex = raw.startsWith('#') ? raw : '#' + raw;
-        if (/^#[0-9a-fA-F]{6}$/.test(hex)) { setHsl(null); store.saveSettings({ color: hex.toLowerCase() }); }
-      },
-    }),
-    hexValid ? null : h(Field, { label: 'Enter six hex digits, like #1a9fff.' }),
+  const chip = (colour, label) => h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 } },
+    h('div', { style: { width: 64, height: 34, borderRadius: 6, background: colour, color: icon === 'light' ? '#fff' : icon === 'dark' ? '#101820' : contrastHex(colour), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,.25)' } }, noteIcon(16)),
+    h('span', { style: { fontSize: 11, opacity: 0.75 } }, label));
+  const swatch = colour => {
+    const pick = () => setFromHex(colour);
+    return h(Focusable, { key: colour, onActivate: pick, onClick: pick, title: colour,
+      style: { width: 22, height: 22, borderRadius: 4, background: colour, cursor: 'pointer', boxSizing: 'border-box', border: colour === hex ? '2px solid #fff' : '1px solid rgba(255,255,255,.2)' } });
+  };
+  const iconIdx = Math.max(0, ICON_OPTIONS.findIndex(o => o.value === icon));
+
+  const body = h('div', { style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 420 } },
+    h('div', { style: { fontSize: 18, fontWeight: 600 } }, 'Colour'),
+    h('div', { style: { display: 'flex', gap: 16, alignItems: 'center' } }, chip(props.initial.color, 'Current'), chip(hex, 'New'), h('span', { style: { opacity: 0.8 } }, `${hex}   rgb(${r}, ${g}, ${b})`)),
+    h('div', { onMouseDown: dragSquare, style: { position: 'relative', width: '100%', height: 180, borderRadius: 6, cursor: 'crosshair', background: `linear-gradient(to top, #000, rgba(0,0,0,0)), linear-gradient(to right, #fff, hsl(${hsv.h}, 100%, 50%))` } },
+      h('div', { style: { position: 'absolute', left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%`, width: 14, height: 14, marginLeft: -7, marginTop: -7, borderRadius: '50%', border: '2px solid #fff', boxShadow: '0 0 0 1px rgba(0,0,0,.6)', pointerEvents: 'none' } })),
+    h(SliderField, { label: 'Hue', value: Math.round(hsv.h), min: 0, max: 360, step: 1, showValue: true, onChange: v => part('h', v) }),
+    h(SliderField, { label: 'Saturation', value: Math.round(hsv.s * 100), min: 0, max: 100, step: 1, showValue: true, valueSuffix: '%', onChange: v => part('s', v / 100) }),
+    h(SliderField, { label: 'Brightness', value: Math.round(hsv.v * 100), min: 0, max: 100, step: 1, showValue: true, valueSuffix: '%', onChange: v => part('v', v / 100) }),
+    h(SliderField, { label: 'Red', value: r, min: 0, max: 255, step: 1, showValue: true, onChange: v => setFromRgb(v, g, b) }),
+    h(SliderField, { label: 'Green', value: g, min: 0, max: 255, step: 1, showValue: true, onChange: v => setFromRgb(r, v, b) }),
+    h(SliderField, { label: 'Blue', value: b, min: 0, max: 255, step: 1, showValue: true, onChange: v => setFromRgb(r, g, v) }),
+    h(TextField, { value: shownHex, placeholder: '#1a9fff', onChange: e => { const raw = e.target.value.trim(); setHexText(raw); const hx = raw.startsWith('#') ? raw : '#' + raw; if (/^#[0-9a-fA-F]{6}$/.test(hx)) setFromHex(hx.toLowerCase()); } }),
+    hexValid ? null : h('div', { style: { fontSize: 12, color: 'var(--gpColor-Red, #e24c4c)' } }, 'Enter six hex digits, like #1a9fff.'),
+    h(Field, { label: 'Palette', description: 'Click any colour.' }),
+    h(Focusable, { style: { display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 420 } }, PALETTE.map(swatch)),
     h(Field, { label: 'Icon colour', description: 'The note icon on the tab.' }, h(Dropdown, {
       rgOptions: ICON_OPTIONS.map(o => ({ data: o.data, label: o.label })), selectedOption: iconIdx, strDefaultLabel: ICON_OPTIONS[iconIdx].label,
-      onChange: o => store.saveSettings({ iconcolor: ICON_OPTIONS.find(x => x.data === o.data).value }),
-    })));
+      onChange: o => setIcon(ICON_OPTIONS.find(x => x.data === o.data).value),
+    })),
+    h(Focusable, { style: { display: 'flex', gap: 8, marginTop: 4 } },
+      h(DialogButtonPrimary, { onClick: () => { props.onApply(hex.toLowerCase(), icon); close(); }, style: { minWidth: 140 } }, 'Use this colour'),
+      h(DialogButton, { onClick: close, style: { minWidth: 100 } }, 'Cancel')));
+  return props.inline ? body : h(ModalRoot, { closeModal: close, onCancel: close, bAllowFullSize: true }, body);
 }
 
-// The colour setting: a short list of suggested colours; choosing Custom opens the small panel above.
+// Tracks whether the popup actually mounted (showModal can fail silently).
+const pickerState = { mounted: false };
+function openColourPicker(event) {
+  pickerState.mounted = false;
+  const st = store.settings;
+  const element = h(ColourPicker, {
+    initial: { color: st.color, iconcolor: st.iconcolor },
+    onApply: (color, iconcolor) => store.saveSettings({ color, iconcolor }),
+    onMounted: () => { pickerState.mounted = true; },
+  });
+  return openPopup(element, { strTitle: 'Colour', popupWidth: 680, popupHeight: 900, bNeverPopOut: false }, event);
+}
+
+// The colour setting: a short list of suggested colours; Custom opens the colour box as its own window.
 function ColourRow() {
   useStore();
   const st = store.settings;
   const [custom, setCustom] = React.useState(!COLOUR_PRESETS.some(c => c.hex === st.color));
+  const [inline, setInline] = React.useState(false);
   const idx = custom ? 7 : Math.max(0, COLOUR_PRESETS.findIndex(c => c.hex === st.color));
-  return h('div', { style: { display: 'flex', flexDirection: 'column' } },
+  const open = event => {
+    const opened = openColourPicker(event);
+    if (!opened) { setInline(true); return; }
+    // if the popup never mounted, fall back to showing the box right here
+    setTimeout(() => { if (!pickerState.mounted) setInline(true); }, 1200);
+  };
+  return h('div', { ref: captureWindow, style: { display: 'flex', flexDirection: 'column' } },
     h(Field, { label: 'Colour', description: 'Colour of the tab and of the note box outline.' }, h(Dropdown, {
       rgOptions: COLOUR_PRESETS.map(c => ({ data: c.data, label: c.label })), selectedOption: idx, strDefaultLabel: COLOUR_PRESETS[idx].label,
       onChange: o => {
         const preset = COLOUR_PRESETS.find(c => c.data === o.data);
-        if (preset.hex) { setCustom(false); store.saveSettings({ color: preset.hex }); } else setCustom(true);
+        if (preset.hex) { setCustom(false); setInline(false); store.saveSettings({ color: preset.hex }); }
+        else { setCustom(true); open(undefined); }
       },
     })),
-    custom ? h(CustomColourPanel) : null);
+    custom ? h(Field, { label: 'Custom colour', description: st.color }, h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } }, h(TabIcon, { st, scale: 0.6 }))) : null,
+    custom ? action({ key: 'colour-open', label: 'Open the colour box', onClick: e => open(e) }) : null,
+    inline ? h(Field, { label: 'The colour box did not open as its own window, so it is shown here.' }) : null,
+    inline ? h(ColourPicker, { inline: true, initial: { color: st.color, iconcolor: st.iconcolor }, onApply: (color, iconcolor) => { store.saveSettings({ color, iconcolor }); setInline(false); }, closeModal: () => setInline(false) }) : null);
 }
 
 function backupStatus(bk) {
@@ -589,6 +826,8 @@ function NotesManager() {
   const [confirmKey, setConfirmKey] = React.useState('');
   const [info, setInfo] = React.useState(null);
   const [diagOn, setDiagOn] = React.useState(diag.on);
+  const [editingKey, setEditingKey] = React.useState('');
+  const [editText, setEditText] = React.useState('');
   const [folderText, setFolderText] = React.useState(null);
   const [confirmRestore, setConfirmRestore] = React.useState('');
 
@@ -643,14 +882,25 @@ function NotesManager() {
   children.push(h(Field, { key: 'pill-head', label: 'Note tab', description: 'A small tab docked to the side of store, community and profile pages. Click it to expand a box for writing the note. Open pages pick up changes when you switch back to them.' }));
   children.push(h(Field, { key: 'pill-on', label: 'Show the tab' }, h(Toggle, { value: st.pill, onChange: v => store.saveSettings({ pill: v }) })));
   const edge = edgeOf(st.facing);
+  const bar = edge === 'a';
   children.push(h(Field, { key: 'pill-facing', label: 'Facing', description: 'Direction' }, dropdown(FACING_OPTIONS, st.facing, o => store.saveSettings({ facing: o.value }))));
-  if (edge === 'c') children.push(h(Field, { key: 'pill-offset-note', label: 'Offset (all tabs)', description: 'Corners ignore the offset.' }));
-  else children.push(h(SliderField, { key: 'pill-offset', label: edge === 'v' ? 'Up/down offset (all tabs)' : 'Left/right offset (all tabs)', value: st.vertical - 50, min: -OFFSET_LIMIT, max: OFFSET_LIMIT, step: 1, showValue: true, valueSuffix: '%', onChange: v => store.saveSettings({ vertical: 50 + v }) }));
-  children.push(h(Field, { key: 'pill-place', label: 'Final location', description: 'A copy of the tab icon on the edge or corner it will sit on. Shapes other than the dot bend to follow a corner.' }));
-  children.push(h('div', { key: 'pill-place-box', style: { padding: '4px 0 14px' } }, h(PlacementPreview, { st })));
+  if (bar) {
+    // the address-bar option replaces the edge tab: the edge controls are disabled and hidden
+    children.push(h(Field, { key: 'bar-status', label: 'Address bar button status', description: urlbar.status }));
+  } else {
+    if (edge === 'c') children.push(h(Field, { key: 'pill-offset-note', label: 'Offset (all tabs)', description: 'Corners ignore the offset.' }));
+    else children.push(h(SliderField, { key: 'pill-offset', label: edge === 'v' ? 'Up/down offset (all tabs)' : 'Left/right offset (all tabs)', value: st.vertical - 50, min: -OFFSET_LIMIT, max: OFFSET_LIMIT, step: 1, showValue: true, valueSuffix: '%', onChange: v => store.saveSettings({ vertical: 50 + v }) }));
+    children.push(h(Field, { key: 'pill-place', label: 'Final location', description: 'A copy of the tab icon on the edge or corner it will sit on. Shapes other than the dot bend to follow a corner.' }));
+    children.push(h('div', { key: 'pill-place-box', style: { padding: '4px 0 14px' } }, h(PlacementPreview, { st })));
+  }
   children.push(h(Field, { key: 'pill-shape', label: 'Shape' }, dropdown(SHAPE_OPTIONS, st.shape, o => store.saveSettings({ shape: o.value }))));
-  children.push(h(Field, { key: 'pill-size', label: 'Size' }, dropdown(SIZE_OPTIONS, st.size, o => store.saveSettings({ size: o.value }))));
+  if (!bar) children.push(h(Field, { key: 'pill-size', label: 'Size' }, dropdown(SIZE_OPTIONS, st.size, o => store.saveSettings({ size: o.value }))));
   children.push(h(ColourRow, { key: 'pill-colours' }));
+  if (!bar) {
+    children.push(h(Field, { key: 'libdock', label: 'Show the tab in the Library', description: 'A note tab over the Library window holding a note for the Library. It hides while a web page is showing.' },
+      h(Toggle, { value: st.libdock, onChange: v => store.saveSettings({ libdock: v }) })));
+    if (st.libdock) children.push(h(Field, { key: 'libdock-status', label: 'Library tab status', description: libdock.status }));
+  }
   children.push(h(Field, { key: 'libtab', label: 'Notes tab on game pages', description: "Adds a Notes tab to the tab row of a game's library page, next to Achievements. Takes effect the next time a game page opens." },
     h(Toggle, { value: st.libtab, onChange: v => store.saveSettings({ libtab: v }) })));
   children.push(h(Field, { key: 'pill-inline', label: 'Also show a note line under titles', description: 'The older inline note under the game or persona name. List pages (friends, wishlist) always show per-row notes.' },
@@ -695,7 +945,7 @@ function NotesManager() {
     const title = `${d.kindLabel}: ${note.label || d.id}`;
     children.push(h(Field, { key: 'n-' + key, label: title, description: note.text || '', bottomSeparator: 'none' },
       h(Focusable, { style: { display: 'flex', gap: '8px' } },
-        h(DialogButton, { onClick: () => openEditor(key, note.label || ''), style: { minWidth: '80px' } }, 'Edit'),
+        h(DialogButton, { onClick: () => { if (editingKey === key) { setEditingKey(''); } else { setEditingKey(key); setEditText(note.text || ''); } }, style: { minWidth: '80px' } }, editingKey === key ? 'Close' : 'Edit'),
         h(DialogButton, {
           onClick: async () => {
             if (confirmKey !== key) { setConfirmKey(key); return; }
@@ -705,6 +955,20 @@ function NotesManager() {
           },
           style: { minWidth: '80px' },
         }, confirmKey === key ? 'Confirm?' : 'Delete'))));
+    if (editingKey === key) {
+      children.push(h('div', { key: 'edit-' + key, style: { padding: '4px 0 12px' } },
+        h(TextField, { value: editText, placeholder: 'Write a note…', onChange: e => setEditText(clampNote(e.target.value)) }),
+        h(NoteCounter, { text: editText }),
+        h(Focusable, { style: { display: 'flex', gap: '8px', marginTop: '6px' } },
+          h(DialogButtonPrimary, {
+            onClick: async () => {
+              const r = await store.save(key, editText, note.label || '');
+              if (r.ok) setEditingKey(''); else setMsg(`${r.error}${r.detail ? ': ' + r.detail : ''}`);
+            },
+            style: { minWidth: '100px' },
+          }, 'Save'),
+          h(DialogButton, { onClick: () => setEditingKey(''), style: { minWidth: '100px' } }, 'Cancel'))));
+    }
   });
   if (rows.length > limit) {
     children.push(action({ key: 'more', label: `Show ${Math.min(PAGE_SIZE, rows.length - limit)} more`, onClick: () => setLimit(limit + PAGE_SIZE) }));
@@ -735,14 +999,20 @@ async function main() {
     store,
     diag,
     libtab,
+    libdock,
+    urlbar,
     openEditor,
-    dispose() { diag.stop(); libtab.stop(); jsxHooks.teardown(); },
+    openColourPicker,
+    dispose() { diag.stop(); libtab.stop(); libdock.stop(); urlbar.stop(); jsxHooks.teardown(); },
   };
   store.load(); // not awaited: a slow backend must not delay the plugin
+  libdock.start();
+  urlbar.start();
   // wait for Steam's services before patching its UI (never blocks the settings page)
   Promise.resolve()
     .then(() => (window.App && typeof window.App.WaitForServicesInitialized === 'function' ? window.App.WaitForServicesInitialized() : null))
     .catch(() => null)
-    .then(() => libtab.start());
+    .then(() => libtab.start())
+    .catch(e => console.warn(`[${PLUGIN}] the game-page Notes tab could not be set up`, e));
   return { title: 'More Notes', icon, content: h(NotesManager) };
 }
