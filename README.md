@@ -1,7 +1,3 @@
-**Reminder how to use this plugin:**
-
-Place in your plugin folder (default C:\Program Files (x86)\Steam\millennium\plugins) and extract all.
-
 # More Notes (Millennium plugin)
 
 Private notes on **people** and **games**, shown in more places across Steam:
@@ -33,7 +29,7 @@ A note can hold up to 4000 characters (letters, accents and emoji each count onc
 ## Where notes are stored, and backups
 `<Steam>/config/MoreNotes_notes.json` (shown in the settings panel). It lives outside the plugin folder so updating or reinstalling the plugin keeps your notes and settings.
 
-A second copy is written on every change to `<Steam>/millennium/More-Notes` (created when the plugin is enabled; `C:\Program Files (x86)\Steam\millennium\More-Notes` on a standard install). If that folder cannot be written it falls back to `Documents\MoreNotes Backup`, then `%APPDATA%\MoreNotes`. You can choose any other folder in settings and change it whenever you like: a copy is written there at once and earlier snapshots are carried over: `MoreNotes_notes.json` (latest) plus `MoreNotes_snapshot_0..6.json`, one per weekday, each holding the last save of that weekday. If the main file is missing or damaged at start-up, the newest valid copy is restored automatically. In settings you can switch the copy off, change the folder, back up now, restore from the copy, or undo with the latest snapshot from an earlier day. To reset everything on purpose, delete the backup folder as well as the main file.
+A second copy is written on every change to `%USERPROFILE%\\Documents\\MoreNotes` on Windows or `$HOME/Documents/MoreNotes` on Linux and Mac (created when the plugin is enabled), together with a readable `Notes.txt` listing all notes. If that folder cannot be written it falls back to `<Steam>/millennium/More-Notes` (the 1.3-1.6 default, still searched for recovery), then `Documents/MoreNotes Backup`, then `%APPDATA%\\MoreNotes`. You can choose any other folder in settings and change it whenever you like: a copy is written there at once and earlier snapshots are carried over: `MoreNotes_notes.json` (latest) plus `MoreNotes_snapshot_0..6.json`, one per weekday, each holding the last save of that weekday. If the main file is missing or damaged at start-up, the newest valid copy is restored automatically. In settings you can switch the copy off, change the folder, back up now, restore from the copy, or undo with the latest snapshot from an earlier day. To reset everything on purpose, delete the backup folder as well as the main file.
 
 ## Build from source
 `node scripts/build.mjs` (source build, shows the developer diagnostics panel) or `node scripts/build.mjs --release` (the shipped build, diagnostics hidden) writes `.millennium/Dist/index.js` and `.millennium/Dist/webkit.js`. Tests: `npm test` (frontend logic against stubs), `python3 tests/webkit_test.py` (web-page script in headless Chromium against fixture pages) `python3 tests/client_test.py` (the Library tab and address-bar button in a page imitating the main window) and `python3 tests/backend_test.py` (the Lua backend under a real Lua 5.4 interpreter via ctypes; the host is LuaJIT, so this checks logic, not Steam's argument plumbing).

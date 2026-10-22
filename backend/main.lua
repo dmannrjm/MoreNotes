@@ -170,7 +170,16 @@ local function normalise(p)
   return r
 end
 
-local function find_root()
+-- Steam's folder (the one with config/config.vdf in it). On Windows, Millennium's plugins sit inside it. On Linux and Mac
+-- they do not (Millennium lives in ~/.local/share/millennium), so the plugin's own path cannot be trusted on its own:
+-- every candidate is checked for a real config folder before it is used.
+local function has_config(p)
+  local f = io.open(p .. "/config/config.vdf", "rb")
+  if f then f:close(); return true end
+  return false
+end
+
+local function plugin_path_root()
   local src = ""
   pcall(function() src = debug.getinfo(1, "S").source or "" end)
   src = normalise((src:gsub("^@", "")))
@@ -178,13 +187,40 @@ local function find_root()
   if root and #root > 0 then return root end
   root = src:match("^(.*)/plugins/MoreNotes/")
   if root and #root > 0 then return root end
-  local ok, p = pcall(function() return millennium.steam_path() end)
-  if ok and type(p) == "string" and #p > 0 then return normalise(p) end
   return nil
+end
+
+local function find_root()
+  local list, seen = {}, {}
+  local function add(p)
+    if type(p) == "string" and #p > 0 then
+      p = normalise(p):gsub("/+$", "")
+      if #p > 0 and not seen[p] then seen[p] = true; list[#list + 1] = p end
+    end
+  end
+  add(plugin_path_root())
+  local ok, sp = pcall(function() return millennium.steam_path() end)
+  local api = (ok and type(sp) == "string" and #sp > 0) and normalise(sp):gsub("/+$", "") or nil
+  add(api)
+  local home = os.getenv("HOME")
+  if home and #home > 0 and not IS_WINDOWS then
+    add(home .. "/.local/share/Steam")
+    add(home .. "/.steam/steam")
+    add(home .. "/.steam/root")
+    add(home .. "/.steam/debian-installation")
+    add(home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam")
+    add(home .. "/.var/app/com.valvesoftware.Steam/.steam/steam")
+    add(home .. "/Library/Application Support/Steam")
+  end
+  for _, c in ipairs(list) do
+    if has_config(c) then return c end
+  end
+  return api -- not verified, but it is Steam's own answer; the write creates config/ if it is missing
 end
 
 -- The notes live in <Steam>/config, outside the plugin folder, so updating or reinstalling the plugin keeps them.
 local root = find_root()
+local legacy_root = plugin_path_root() -- where 1.3-1.6 put their More-Notes folder
 local NOTES_PATH = (root and (root .. "/config/MoreNotes_notes.json")) or "MoreNotes_notes.json"
 
 local notes = {}
@@ -267,9 +303,19 @@ local function file_exists(path)
   return false
 end
 
+local make_dirs -- defined below
+
 local function write_atomic(path, content)
   local tmp = path .. ".tmp"
   local f, err = io.open(tmp, "wb")
+  if not f then
+    -- the folder may not exist yet (for instance Steam's config folder on a fresh install): create it once and retry
+    local dir = normalise(path):match("^(.*)/[^/]+$")
+    if dir and #dir > 0 and make_dirs then
+      pcall(make_dirs, dir)
+      f, err = io.open(tmp, "wb")
+    end
+  end
   if not f then return false, tostring(err) end
   local okw, werr = f:write(content)
   f:close()
@@ -315,7 +361,7 @@ local function windows_dir_api()
   return k32
 end
 
-local function make_dirs(dir)
+make_dirs = function(dir)
   local d = normalise(dir)
   local lib = windows_dir_api()
   if lib then
@@ -338,18 +384,30 @@ local function make_dirs(dir)
   end
 end
 
--- The default folder for the second copy: <Steam>/millennium/More-Notes, created when the plugin loads.
--- Documents and %APPDATA% remain as fallbacks if that folder cannot be written.
+-- The default folder (all systems): <Documents>/MoreNotes, i.e. %USERPROFILE%\Documents\MoreNotes on Windows and
+-- $HOME/Documents/MoreNotes on Linux and Mac. It holds the backup copy, the weekday snapshots and a readable Notes.txt.
+-- Earlier default folders stay as fallbacks (and are searched when recovering), so nothing is lost on update.
+local function home_dir()
+  local first, second = os.getenv("USERPROFILE"), os.getenv("HOME")
+  if not IS_WINDOWS then first, second = second, first end
+  for _, h in ipairs({ first or "", second or "" }) do
+    if #h > 0 then return (normalise(h):gsub("/+$", "")) end
+  end
+  return nil
+end
+
 local function default_dirs()
   local out = {}
-  if root and #root > 0 then out[#out + 1] = root .. "/millennium/More-Notes" end
-  local home = os.getenv("USERPROFILE") or os.getenv("HOME")
-  if home and #home > 0 then out[#out + 1] = normalise(home):gsub("/+$", "") .. "/Documents/MoreNotes Backup" end
+  local home = home_dir()
+  if home then out[#out + 1] = home .. "/Documents/MoreNotes" end
+  if legacy_root then out[#out + 1] = legacy_root .. "/millennium/More-Notes" end -- the 1.3-1.6 default
+  if root and root ~= legacy_root then out[#out + 1] = root .. "/millennium/More-Notes" end
+  if home then out[#out + 1] = home .. "/Documents/MoreNotes Backup" end
   local appdata = os.getenv("APPDATA")
   if appdata and #appdata > 0 then
     out[#out + 1] = normalise(appdata):gsub("/+$", "") .. "/MoreNotes"
-  elseif home and #home > 0 then
-    out[#out + 1] = normalise(home):gsub("/+$", "") .. "/.MoreNotes"
+  elseif home then
+    out[#out + 1] = home .. "/.MoreNotes"
   end
   return out
 end
@@ -377,13 +435,43 @@ local function dir_writable(dir)
   return true
 end
 
--- Creates the default More-Notes folder (if it is missing) as soon as the plugin is enabled.
+-- Creates the default MoreNotes folder in Documents (if it is missing) as soon as the plugin is enabled.
 local function ensure_default_folder()
   local d = default_dirs()[1]
   if not d then return false end
   if dir_writable(d) then return true end
   make_dirs(d)
   return dir_writable(d)
+end
+
+-- A readable copy of every note (Notes.txt), written next to the backup files.
+local function readable_text()
+  local keys = {}
+  for k in pairs(notes) do keys[#keys + 1] = k end
+  table.sort(keys)
+  local out = { "More Notes - your private notes for Steam", "Saved " .. os.date("%Y-%m-%d %H:%M"), "" }
+  for _, k in ipairs(keys) do
+    local n = notes[k]
+    if type(n) == "table" then
+      out[#out + 1] = "=== " .. ((type(n.label) == "string" and #n.label > 0) and n.label or k) .. " [" .. k .. "] ==="
+      out[#out + 1] = tostring(n.text or "")
+      out[#out + 1] = ""
+    end
+  end
+  return table.concat(out, "\r\n")
+end
+
+local function write_text_export()
+  local text = readable_text()
+  local done = {}
+  local function put(d)
+    if d and not done[d] then
+      done[d] = true
+      write_atomic(d .. "/Notes.txt", text)
+    end
+  end
+  put(default_dirs()[1])
+  if settings.backup then put(backup_state.dir) end
 end
 
 local function backup_write(content, force)
@@ -488,6 +576,7 @@ local function save_notes()
   local ok, err = write_atomic(NOTES_PATH, content)
   if not ok then return false, err end
   pcall(backup_write, content) -- a backup problem must never fail a save
+  pcall(write_text_export)
   return true
 end
 
@@ -673,6 +762,14 @@ function on_load()
   log("loaded " .. count_notes() .. " notes from " .. NOTES_PATH)
   pcall(ensure_default_folder)
   pcall(backup_write, snapshot_doc()) -- first copy, or a refresh after an update
+  pcall(write_text_export)
+  -- bring snapshots from the 1.3-1.6 default folder into the new default so Undo history is kept
+  pcall(function()
+    local dirs = default_dirs()
+    if dirs[1] and (not settings.backupdir or #settings.backupdir == 0) then
+      for i = 2, #dirs do carry_over(dirs[i], dirs[1]) end
+    end
+  end)
   if not ready_called then
     ready_called = true
     pcall(function() millennium.ready() end)

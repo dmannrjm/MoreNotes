@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.0
+- **Linux and Mac fix**: saving a note failed with `write_failed: ~/.local/share/config/MoreNotes_notes.json.tmp: No such file or directory`. The plugin worked out Steam's folder from Millennium's own path, which only holds on Windows (on Linux Millennium lives in `~/.local/share/millennium`, not inside Steam). It now asks Millennium for Steam's path, also tries the usual Linux locations (`~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, the Flatpak install) and the Mac one, and only accepts a folder that really has `config/config.vdf` in it.
+- If Steam's `config` folder is missing, it is created on the first save instead of failing.
+- Earlier versions on Linux never managed to save, so there is nothing to migrate; the 1.3-1.6 backup folder is still searched for recovery.
+
+## 1.8.0
+- Settings wording updated: shorter page description ("Private notes on people and games."), the Note tab text now says "various pages" and "notes", "Corners ignore offset.", the Automatic backup text now starts its second-copy sentence with "A second copy..." and says "within your Documents folder", and the folder box placeholder reads "Default folder path (<the default folder>)".
+
+## 1.7.0
+- **New default folder, per operating system**: the plugin now creates `%USERPROFILE%\\Documents\\MoreNotes` on Windows and `$HOME/Documents/MoreNotes` on Linux and Mac as soon as it is enabled. It holds the second copy (`MoreNotes_notes.json`), the weekday snapshots (`MoreNotes_snapshot_0..6.json`) and a new readable **`Notes.txt`** listing every note (label, key, text), refreshed on every change.
+- Notes.txt is written to the default folder even if the second copy is switched off; with the copy on, it is also written to the chosen backup folder.
+- The 1.3-1.6 default (`<Steam>/millennium/More-Notes`) and `Documents/MoreNotes Backup` become fallbacks and recovery locations; on load, earlier snapshots found there are carried into the new folder so Undo history is kept. Your main notes file in `<Steam>/config` is unchanged.
+- Settings page text for Automatic backup updated.
+
 ## 1.6.0
 - **Colour box**: choosing Custom opens an independent box (its own Steam popup) with a saturation/brightness square, hue, saturation, brightness, red/green/blue sliders, a hex field, a 72-colour palette (12 hues x 5 lightness levels plus greys), Current vs New previews and the icon colour. Nothing is applied until "Use this colour". If the popup cannot open or never appears, the same box is shown inside the settings page instead. The small inline panel is gone.
 - **Edit button in settings fixed**: Edit now expands an editor right under the row (text box, counter, Save, Cancel) instead of relying on a popup that was not appearing. Popups that are still used (the colour box, the address-bar button's editor) now try the window the click came from first, then the settings window, then the Library window.

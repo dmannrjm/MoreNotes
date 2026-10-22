@@ -68,7 +68,7 @@ const stub = name => { const f = props => React.createElement('div', { ...props,
 // ---- fake backend (mirrors the Lua semantics we rely on) -------------------------------------
 const backendNotes = {};
 let backendSettings = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false, libdock: true };
-let backupInfoReply = { ok: true, enabled: true, dir: 'C:/Users/me/Documents/MoreNotes Backup', saved_at: 1760700000, count: 3, error: '', restored_from: '', default_dir: 'C:/Users/me/Documents/MoreNotes Backup' };
+let backupInfoReply = { ok: true, enabled: true, dir: 'C:/Users/me/Documents/MoreNotes', saved_at: 1760700000, count: 3, error: '', restored_from: '', default_dir: 'C:/Users/me/Documents/MoreNotes' };
 let restoreReply = { ok: true, count: 2, from: 'x' };
 let acceptDir = true;
 let backendDown = false;
@@ -425,7 +425,7 @@ await test('corners ignore the offset; the dot floats, every other shape bends t
   setLook({ facing: 'bottomright', shape: 'pill', size: 'medium' });
   assert.equal(sliderByLabel('Up/down offset (all tabs)'), undefined);
   assert.equal(sliderByLabel('Left/right offset (all tabs)'), undefined);
-  assert.equal(labelRow('Offset (all tabs)').props.description, 'Corners ignore the offset.');
+  assert.equal(labelRow('Offset (all tabs)').props.description, 'Corners ignore offset.');
   assert.equal(iconStyle().borderRadius, '100% 0 0 0', 'bent pill: only the inner corner is rounded');
   assert.equal(iconStyle().width, 68 * 0.7);
   assert.equal(iconStyle().height, 68 * 0.7);
@@ -619,7 +619,7 @@ await test('pill and inline toggles write through', async () => {
 await test('backup section lists the toggle, folder, status and actions', () => {
   const t = textOf(tree);
   for (const l of ['Automatic backup', 'Keep a second copy', 'Backup status', 'Back up now', 'Use this folder']) assert.match(t, new RegExp(l));
-  assert.match(t, /Last copy .*3 notes, in C:\/Users\/me\/Documents\/MoreNotes Backup/);
+  assert.match(t, /Last copy .*3 notes, in C:\/Users\/me\/Documents\/MoreNotes/);
   assert.equal(findAll(tree, n => n.host === 'ButtonItem' && /^Restore notes and settings/.test(n.props.label)).length, 1);
 });
 
@@ -634,7 +634,7 @@ await test('backup toggle writes through as a JSON string', async () => {
 
 await test('a chosen backup folder is only sent when Use this folder is pressed', async () => {
   const before = settingsCalls().length;
-  const dirField = () => fields().find(f => f.props.placeholder === 'C:/Users/me/Documents/MoreNotes Backup');
+  const dirField = () => fields().find(f => f.props.placeholder === 'Default folder path (C:/Users/me/Documents/MoreNotes)');
   dirField().props.onChange({ target: { value: 'D:\\Backups\\Notes' } }); rerender();
   dirField().props.onChange({ target: { value: 'D:\\Backups\\Notes2' } }); rerender();
   await wait(450);
@@ -645,7 +645,7 @@ await test('a chosen backup folder is only sent when Use this folder is pressed'
 
 await test('a rejected folder shows an explanation', async () => {
   acceptDir = false;
-  fields().find(f => f.props.placeholder === 'C:/Users/me/Documents/MoreNotes Backup').props.onChange({ target: { value: 'C:\\bad&path' } }); rerender();
+  fields().find(f => f.props.placeholder === 'Default folder path (C:/Users/me/Documents/MoreNotes)').props.onChange({ target: { value: 'C:\\bad&path' } }); rerender();
   await clickAction('Use this folder');
   assert.match(textOf(tree), /That folder was not accepted/);
   acceptDir = true;

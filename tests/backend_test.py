@@ -9,9 +9,10 @@ STEAM = Path('/tmp/steamtest')
 BACKEND = STEAM / 'millennium' / 'plugins' / 'MoreNotes' / 'backend' / 'main.lua'
 NOTES = STEAM / 'config' / 'MoreNotes_notes.json'
 HOME = Path('/tmp/steamtest_home'); APPD = Path('/tmp/steamtest_appdata'); CUSTOM = Path('/tmp/steamtest_custom')
-os.environ['USERPROFILE'] = str(HOME); os.environ['APPDATA'] = str(APPD)
-BK = STEAM / 'millennium' / 'More-Notes'          # the new default
-BK_DOCS = HOME / 'Documents' / 'MoreNotes Backup'      # fallback
+os.environ['USERPROFILE'] = str(HOME); os.environ['HOME'] = str(HOME); os.environ['APPDATA'] = str(APPD)
+BK = HOME / 'Documents' / 'MoreNotes'            # the default (1.7.0): <home>/Documents/MoreNotes
+BK_OLD = STEAM / 'millennium' / 'More-Notes'      # the 1.3-1.6 default, now a fallback
+BK_DOCS = HOME / 'Documents' / 'MoreNotes Backup'      # older fallback
 BK_APPDATA = APPD / 'MoreNotes'                          # fallback
 
 lib = ctypes.CDLL('liblua5.4.so.0')
@@ -25,12 +26,12 @@ lib.lua_settop.argtypes = [ctypes.c_void_p, ctypes.c_int]
 lib.lua_close.argtypes = [ctypes.c_void_p]
 
 class Lua:
-    def __init__(self):
+    def __init__(self, backend=None, steam_path='/tmp/steamtest'):
         self.L = lib.luaL_newstate(); lib.luaL_openlibs(self.L)
         self.run("""
-          package.preload['millennium'] = function() return { ready = function() READY = (READY or 0) + 1 end, steam_path = function() return '/tmp/steamtest' end } end
+          package.preload['millennium'] = function() return { ready = function() READY = (READY or 0) + 1 end, steam_path = function() return '%s' end } end
           package.preload['logger'] = function() return { info = function(self, m) end } end
-          dofile('%s')""" % BACKEND)
+          dofile('%s')""" % (steam_path, backend or BACKEND))
     def run(self, code):
         if lib.luaL_loadstring(self.L, ('return (function() ' + code + ' end)()').encode()) != 0:
             msg = lib.lua_tolstring(self.L, -1, None); raise RuntimeError('load: ' + msg.decode())
@@ -247,19 +248,20 @@ check('an unwritable backup folder does not fail the save and is reported', r['o
 L.call('set_settings', '{ json = %s }' % lua_str('{"backupdir":""}'))
 L.call('set_note', '{ key = "app:6", text = "six" }')
 check('recovers once the folder is valid again', L.call('backup_info')['error'] == '' and mirror_doc()['notes']['app:6']['text'] == 'six')
-check('only expected files in the backup folder', sorted(p.name for p in BK.iterdir() if not p.name.startswith('MoreNotes_snapshot_')) == ['MoreNotes_notes.json'])
+check('only expected files in the backup folder', sorted(p.name for p in BK.iterdir() if not p.name.startswith('MoreNotes_snapshot_')) == ['MoreNotes_notes.json', 'Notes.txt'])
 L.close()
 
 
 # =====================================================================================================
-# Default folder: <Steam>/millennium/More-Notes, created when the plugin is enabled
+# Default folder: <home>/Documents/MoreNotes, created when the plugin is enabled
 # =====================================================================================================
 fresh()
 check('the folder does not exist before the plugin loads', not BK.exists())
 L = Lua()
 L.run('on_load() return ""')
-check('enabling the plugin creates <Steam>/millennium/More-Notes', BK.is_dir())
-check('the first copy lands in that folder', (BK / 'MoreNotes_notes.json').exists() and not BK_DOCS.exists())
+check('enabling the plugin creates <home>/Documents/MoreNotes', BK.is_dir())
+check('the first copy lands in that folder', (BK / 'MoreNotes_notes.json').exists() and not BK_DOCS.exists() and not BK_OLD.exists())
+check('a readable Notes.txt is created there too', (BK / 'Notes.txt').exists() and 'More Notes' in (BK / 'Notes.txt').read_text())
 check('it is reported as the default folder', L.call('backup_info')['default_dir'] == str(BK) and L.call('backup_info')['dir'] == str(BK))
 L.close()
 
@@ -271,12 +273,25 @@ L = Lua(); L.run('on_load() return ""')
 check('the folder is created even if the second copy is off (and no copy is written)', BK.is_dir() and not (BK / 'MoreNotes_notes.json').exists())
 L.close()
 
-# unwritable default: falls back to Documents
+# unwritable default: falls back to the older Steam folder
 fresh()
 BK.parent.mkdir(parents=True, exist_ok=True)
 BK.write_text('a plain file where the folder should be')
 L = Lua(); L.run('on_load() return ""')
-check('if More-Notes cannot be created, the copy falls back to Documents', (BK_DOCS / 'MoreNotes_notes.json').exists() and L.call('backup_info')['dir'] == str(BK_DOCS))
+check('if Documents/MoreNotes cannot be created, the copy falls back to <Steam>/millennium/More-Notes', (BK_OLD / 'MoreNotes_notes.json').exists() and L.call('backup_info')['dir'] == str(BK_OLD))
+L.close()
+
+# notes written readable, and snapshots from the old default folder are carried into the new one
+fresh()
+BK_OLD.mkdir(parents=True)
+(BK_OLD / 'MoreNotes_snapshot_9.json').write_text('x')
+yday = [d for d in range(7) if str(d) != time.strftime('%w')][0]
+(BK_OLD / ('MoreNotes_snapshot_%d.json' % yday)).write_text(json.dumps({'version': 1, 'saved_at': int(time.time()) - 86400, 'notes': {'app:5': {'text': 'old day', 'updated': 1}}, 'settings': {}}))
+L = Lua(); L.run('on_load() return \"\"')
+check('on load, earlier snapshots from the old default folder are carried into Documents/MoreNotes', (BK / ('MoreNotes_snapshot_%d.json' % yday)).exists())
+L.call('set_note', '{ key = \"app:1\", text = \"line one\", label = \"Game one\" }')
+txt = (BK / 'Notes.txt').read_text()
+check('Notes.txt lists each note with its label, key and text', 'Game one [app:1]' in txt and 'line one' in txt)
 L.close()
 
 # an older copy in Documents is still found for recovery
@@ -346,6 +361,30 @@ check('an invalid libdock value is ignored', r['settings']['libdock'] is False)
 L.call('set_settings', '{ json = %s }' % lua_str('{"libdock":true}'))
 check('the library note tab is off by default', DEFAULTS['libtab'] is False and L.call('get_settings')['settings']['libtab'] is False)
 check('the inline note line under titles is off by default', L.call('get_settings')['settings']['inline'] is False)
+L.close()
+
+# ---- Linux/Mac layout: Millennium lives in ~/.local/share/millennium, Steam in ~/.local/share/Steam
+fresh()
+LX_BACKEND = HOME / '.local' / 'share' / 'millennium' / 'plugins' / 'MoreNotes' / 'backend' / 'main.lua'
+LX_BACKEND.parent.mkdir(parents=True); shutil.copy(root / 'backend' / 'main.lua', LX_BACKEND)
+LX_STEAM = HOME / '.local' / 'share' / 'Steam'
+(LX_STEAM / 'config').mkdir(parents=True); (LX_STEAM / 'config' / 'config.vdf').write_text('"InstallConfigStore" {}')
+L = Lua(backend=LX_BACKEND, steam_path='')
+check('on Linux the notes go to the real Steam config folder, not next to millennium', L.call('get_info')['path'] == str(LX_STEAM / 'config' / 'MoreNotes_notes.json'))
+r = L.call('set_note', '{ key = "app:7", text = "linux note" }')
+check('saving works on the Linux layout', r['ok'] and (LX_STEAM / 'config' / 'MoreNotes_notes.json').exists() and not (HOME / '.local' / 'share' / 'config').exists())
+L.close()
+# the same layout when Millennium reports Steam's path itself
+L = Lua(backend=LX_BACKEND, steam_path=str(LX_STEAM))
+check('Millennium steam_path is used when it is right', L.call('get_info')['path'] == str(LX_STEAM / 'config' / 'MoreNotes_notes.json'))
+L.close()
+# a Steam folder whose config/ does not exist yet: the folder is created on the first save
+fresh()
+LX_BACKEND.parent.mkdir(parents=True); shutil.copy(root / 'backend' / 'main.lua', LX_BACKEND)
+(HOME / '.local' / 'share' / 'Steam').mkdir(parents=True)
+L = Lua(backend=LX_BACKEND, steam_path=str(HOME / '.local' / 'share' / 'Steam'))
+r = L.call('set_note', '{ key = "app:8", text = "needs config folder" }')
+check('a missing config folder is created on save instead of failing with write_failed', r['ok'] and (HOME / '.local' / 'share' / 'Steam' / 'config' / 'MoreNotes_notes.json').exists())
 L.close()
 
 print('\n%d failure(s)' % len(failures))

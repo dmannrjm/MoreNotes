@@ -1,6 +1,6 @@
 // More Notes frontend (classic packaging). `React` and `API` are provided by the build wrapper.
 const PLUGIN = 'MoreNotes';
-const VERSION = '1.6.0';
+const VERSION = '1.9.0';
 const SHOW_DIAGNOSTICS = true; // @build:diagnostics
 const h = React.createElement;
 
@@ -860,7 +860,7 @@ function NotesManager() {
 
   const children = [];
 
-  children.push(h(Field, { key: 'about', label: 'More Notes', description: 'Private notes on people and games. They show up on store, community, profile and wishlist pages, and are managed here.' }));
+  children.push(h(Field, { key: 'about', label: 'More Notes', description: 'Private notes on people and games.' }));
 
   if (store.status === 'loading' || store.status === 'idle') {
     children.push(h(Field, { key: 'loading', label: 'Loading notes…' }));
@@ -879,7 +879,7 @@ function NotesManager() {
     onChange: o => onPick(opts.find(x => x.data === o.data)),
   });
 
-  children.push(h(Field, { key: 'pill-head', label: 'Note tab', description: 'A small tab docked to the side of store, community and profile pages. Click it to expand a box for writing the note. Open pages pick up changes when you switch back to them.' }));
+  children.push(h(Field, { key: 'pill-head', label: 'Note tab', description: 'A small tab docked to the side of various pages. Click to open a box for writing notes. Open pages pick up changes when you switch back to them.' }));
   children.push(h(Field, { key: 'pill-on', label: 'Show the tab' }, h(Toggle, { value: st.pill, onChange: v => store.saveSettings({ pill: v }) })));
   const edge = edgeOf(st.facing);
   const bar = edge === 'a';
@@ -888,7 +888,7 @@ function NotesManager() {
     // the address-bar option replaces the edge tab: the edge controls are disabled and hidden
     children.push(h(Field, { key: 'bar-status', label: 'Address bar button status', description: urlbar.status }));
   } else {
-    if (edge === 'c') children.push(h(Field, { key: 'pill-offset-note', label: 'Offset (all tabs)', description: 'Corners ignore the offset.' }));
+    if (edge === 'c') children.push(h(Field, { key: 'pill-offset-note', label: 'Offset (all tabs)', description: 'Corners ignore offset.' }));
     else children.push(h(SliderField, { key: 'pill-offset', label: edge === 'v' ? 'Up/down offset (all tabs)' : 'Left/right offset (all tabs)', value: st.vertical - 50, min: -OFFSET_LIMIT, max: OFFSET_LIMIT, step: 1, showValue: true, valueSuffix: '%', onChange: v => store.saveSettings({ vertical: 50 + v }) }));
     children.push(h(Field, { key: 'pill-place', label: 'Final location', description: 'A copy of the tab icon on the edge or corner it will sit on. Shapes other than the dot bend to follow a corner.' }));
     children.push(h('div', { key: 'pill-place-box', style: { padding: '4px 0 14px' } }, h(PlacementPreview, { st })));
@@ -914,9 +914,9 @@ function NotesManager() {
     key, label: confirmRestore === which ? armed : idle,
     onClick: () => { if (confirmRestore !== which) { setConfirmRestore(which); return; } setConfirmRestore(''); store.restoreBackup(which); },
   });
-  children.push(h(Field, { key: 'bk-head', label: 'Automatic backup', description: "Your notes and settings are kept in Steam's config folder, outside the plugin, so updating or reinstalling the plugin never touches them. This also keeps a second copy, updated on every change, with one snapshot per weekday, in the More-Notes folder the plugin creates inside Steam's millennium folder (or a folder you choose below). If the main file goes missing or is damaged, it is restored from the copy automatically." }));
+  children.push(h(Field, { key: 'bk-head', label: 'Automatic backup', description: "Your notes and settings are kept in Steam's config folder, outside the plugin, so updating or reinstalling the plugin never touches them. A second copy, updated on every change, with one snapshot per weekday, in the MoreNotes folder the plugin creates within your Documents folder (or a folder you choose below), along with a readable Notes.txt. If the main file goes missing or is damaged, it is restored from the copy automatically." }));
   children.push(h(Field, { key: 'bk-on', label: 'Keep a second copy' }, h(Toggle, { value: st.backup, onChange: v => { store.saveSettings({ backup: v }); setTimeout(() => store.refreshBackup(), 700); } })));
-  children.push(h(TextField, { key: 'bk-dir', value: shownFolder, placeholder: (bk && bk.default_dir) || 'Default folder', onChange: e => setFolderText(e.target.value) }));
+  children.push(h(TextField, { key: 'bk-dir', value: shownFolder, placeholder: (bk && bk.default_dir) ? 'Default folder path (' + bk.default_dir + ')' : 'Default folder path', onChange: e => setFolderText(e.target.value) }));
   children.push(action({ key: 'bk-use', label: 'Use this folder', onClick: () => store.setBackupDir(shownFolder) }));
   if (st.backupdir) children.push(action({ key: 'bk-default', label: 'Use the default folder', onClick: () => { setFolderText(''); store.setBackupDir(''); } }));
   children.push(h(Field, { key: 'bk-status', label: 'Backup status', description: backupStatus(bk) }));
