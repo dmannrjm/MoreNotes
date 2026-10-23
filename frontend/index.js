@@ -1,6 +1,6 @@
 // More Notes frontend (classic packaging). `React` and `API` are provided by the build wrapper.
 const PLUGIN = 'MoreNotes';
-const VERSION = '1.9.0';
+const VERSION = '2.3.0';
 const SHOW_DIAGNOSTICS = true; // @build:diagnostics
 const h = React.createElement;
 
@@ -35,7 +35,7 @@ const MAX_NOTE = 4000; // characters; the backend enforces the same limit
 const cpLen = s => Array.from(String(s || '')).length; // code points, so an emoji counts once like the backend counts it
 const clampNote = s => { const a = Array.from(String(s || '')); return a.length > MAX_NOTE ? a.slice(0, MAX_NOTE).join('') : String(s || ''); };
 
-const DEFAULT_SETTINGS = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false, libdock: true };
+const DEFAULT_SETTINGS = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', backupfile: '', snapdir: '', iconcolor: 'auto', libtab: false, libdock: true };
 const ENUM_VALUES = { facing: ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright', 'addressbar'], shape: ['pill', 'circle', 'square', 'tab'], size: ['small', 'medium', 'large'], iconcolor: ['auto', 'light', 'dark'] };
 
 function mergeSettings(base, incoming) {
@@ -47,6 +47,8 @@ function mergeSettings(base, incoming) {
   if (typeof incoming.libtab === 'boolean') out.libtab = incoming.libtab;
   if (typeof incoming.libdock === 'boolean') out.libdock = incoming.libdock;
   if (typeof incoming.backupdir === 'string') out.backupdir = incoming.backupdir.slice(0, 240);
+  if (typeof incoming.backupfile === 'string') out.backupfile = incoming.backupfile.slice(0, 240);
+  if (typeof incoming.snapdir === 'string') out.snapdir = incoming.snapdir.slice(0, 240);
   for (const k of Object.keys(ENUM_VALUES)) if (ENUM_VALUES[k].includes(incoming[k])) out[k] = incoming[k];
   if (incoming.facing === undefined && (incoming.side === 'left' || incoming.side === 'right')) out.facing = incoming.side; // older versions
   const v = Number(incoming.vertical);
@@ -82,14 +84,30 @@ const store = {
     const r = await backend('backup_info');
     if (r.ok) { this.backupInfo = r; this.emit(); }
   },
-  async setBackupDir(dir) {
-    const want = String(dir || '').trim();
-    const r = await backend('set_settings', { json: JSON.stringify({ backupdir: want }) });
-    if (!r.ok) this.backupMsg = `Could not save the folder: ${r.error || 'failed'}`;
+  // One input for the second copy: a path ending in .json is the file itself, anything else is a folder.
+  async setBackupPath(value) {
+    const want = String(value || '').trim();
+    const isFile = /\.json$/i.test(want);
+    const payload = want === '' ? { backupfile: '', backupdir: '' } : (isFile ? { backupfile: want, backupdir: '' } : { backupfile: '', backupdir: want });
+    const r = await backend('set_settings', { json: JSON.stringify(payload) });
+    if (!r.ok) this.backupMsg = `Could not save the path: ${r.error || 'failed'}`;
     else {
       this.settings = mergeSettings(this.settings, r.settings);
       const wanted = want.replace(/\\/g, '/').replace(/\/+$/, '');
-      this.backupMsg = this.settings.backupdir === wanted ? '' : 'That folder was not accepted. Use a full path, such as C:\\Users\\you\\Documents\\MoreNotes, with only letters, numbers, spaces and - _ . ( ) : / \\ ~ , characters.';
+      const got = isFile ? this.settings.backupfile : this.settings.backupdir;
+      this.backupMsg = (want === '' || got === wanted) ? '' : 'That path was not accepted. Use a full folder path, or a full file path ending in .json, such as C:\\Users\\you\\Documents\\MoreNotes\\MoreNotes_notes.json, with only letters, numbers, spaces and - _ . ( ) : / \\ ~ , characters.';
+    }
+    await this.refreshBackup();
+    this.emit();
+  },
+  async setSnapDir(dir) {
+    const want = String(dir || '').trim();
+    const r = await backend('set_settings', { json: JSON.stringify({ snapdir: want }) });
+    if (!r.ok) this.backupMsg = `Could not save the backup folder: ${r.error || 'failed'}`;
+    else {
+      this.settings = mergeSettings(this.settings, r.settings);
+      const wanted = want.replace(/\\/g, '/').replace(/\/+$/, '');
+      this.backupMsg = (want === '' || this.settings.snapdir === wanted) ? '' : 'That backup folder was not accepted. Use a full folder path, such as C:\\Users\\you\\Documents\\MoreNotes\\Backups, with only letters, numbers, spaces and - _ . ( ) : / \\ ~ , characters.';
     }
     await this.refreshBackup();
     this.emit();
@@ -103,7 +121,7 @@ const store = {
   async restoreBackup(which) {
     const r = await backend('restore_backup', { which });
     if (r.ok) { await this.load(); this.backupMsg = `Restored ${r.count} notes.`; }
-    else this.backupMsg = r.error === 'no_previous' ? 'No snapshot from an earlier day was found.' : r.error === 'no_backup' ? 'No backup copy was found.' : `Restore failed: ${r.error || 'unknown error'}`;
+    else this.backupMsg = r.error === 'no_previous' ? 'No backup from an earlier day was found.' : r.error === 'no_backup' ? 'No backup copy was found.' : `Restore failed: ${r.error || 'unknown error'}`;
     await this.refreshBackup();
     this.emit();
   },
@@ -810,8 +828,8 @@ function ColourRow() {
 function backupStatus(bk) {
   if (!bk) return 'Checking…';
   if (!bk.enabled) return "Off. Notes are only stored in Steam's config folder.";
-  if (bk.error) return `Could not write a copy: ${bk.error}. Folder: ${bk.dir}`;
-  if (bk.saved_at > 0) return `Last copy ${new Date(bk.saved_at * 1000).toLocaleString()}, ${bk.count} notes, in ${bk.dir}`;
+  if (bk.error) return `Could not write a copy: ${bk.error}. ${bk.file ? 'File: ' + bk.file : 'Folder: ' + bk.dir}`;
+  if (bk.saved_at > 0) return `Last copy ${new Date(bk.saved_at * 1000).toLocaleString()}, ${bk.count} notes, in ${bk.file || bk.dir}`;
   return 'No copy yet.';
 }
 
@@ -829,6 +847,7 @@ function NotesManager() {
   const [editingKey, setEditingKey] = React.useState('');
   const [editText, setEditText] = React.useState('');
   const [folderText, setFolderText] = React.useState(null);
+  const [snapText, setSnapText] = React.useState(null);
   const [confirmRestore, setConfirmRestore] = React.useState('');
 
   React.useEffect(() => {
@@ -909,22 +928,26 @@ function NotesManager() {
 
   // Automatic backup outside the plugin
   const bk = store.backupInfo;
-  const shownFolder = folderText === null ? st.backupdir : folderText;
+  const shownFolder = folderText === null ? (st.backupfile || st.backupdir) : folderText;
+  const shownSnap = snapText === null ? st.snapdir : snapText;
   const restoreRow = (key, which, idle, armed) => action({
     key, label: confirmRestore === which ? armed : idle,
     onClick: () => { if (confirmRestore !== which) { setConfirmRestore(which); return; } setConfirmRestore(''); store.restoreBackup(which); },
   });
-  children.push(h(Field, { key: 'bk-head', label: 'Automatic backup', description: "Your notes and settings are kept in Steam's config folder, outside the plugin, so updating or reinstalling the plugin never touches them. A second copy, updated on every change, with one snapshot per weekday, in the MoreNotes folder the plugin creates within your Documents folder (or a folder you choose below), along with a readable Notes.txt. If the main file goes missing or is damaged, it is restored from the copy automatically." }));
+  children.push(h(Field, { key: 'bk-head', label: 'Automatic backup', description: "Your notes and settings are kept in Steam's config folder, outside the plugin, so updating or reinstalling the plugin never touches them. A second copy, updated on every change, with one backup per weekday, in the MoreNotes folder the plugin creates within your Documents folder (or a folder you choose below), along with a readable Notes.txt. If the main file goes missing or is damaged, it is restored from the copy automatically." }));
   children.push(h(Field, { key: 'bk-on', label: 'Keep a second copy' }, h(Toggle, { value: st.backup, onChange: v => { store.saveSettings({ backup: v }); setTimeout(() => store.refreshBackup(), 700); } })));
-  children.push(h(TextField, { key: 'bk-dir', value: shownFolder, placeholder: (bk && bk.default_dir) ? 'Default folder path (' + bk.default_dir + ')' : 'Default folder path', onChange: e => setFolderText(e.target.value) }));
-  children.push(action({ key: 'bk-use', label: 'Use this folder', onClick: () => store.setBackupDir(shownFolder) }));
-  if (st.backupdir) children.push(action({ key: 'bk-default', label: 'Use the default folder', onClick: () => { setFolderText(''); store.setBackupDir(''); } }));
+  children.push(h(TextField, { key: 'bk-dir', value: shownFolder, placeholder: (bk && bk.default_file) ? 'Default file path (' + bk.default_file + ')' : 'Default file path', onChange: e => setFolderText(e.target.value) }));
+  children.push(action({ key: 'bk-use', label: 'Use this path', onClick: () => store.setBackupPath(shownFolder) }));
+  if (st.backupdir || st.backupfile) children.push(action({ key: 'bk-default', label: 'Use the default path', onClick: () => { setFolderText(''); store.setBackupPath(''); } }));
+  children.push(h(TextField, { key: 'bk-snap', value: shownSnap, placeholder: (bk && bk.snap_dir) ? 'Default backup folder path (' + bk.snap_dir + ')' : 'Default backup folder path', onChange: e => setSnapText(e.target.value) }));
+  children.push(action({ key: 'bk-use-snap', label: 'Use this backup folder', onClick: () => store.setSnapDir(shownSnap) }));
+  if (st.snapdir) children.push(action({ key: 'bk-default-snap', label: 'Use the default backup folder', onClick: () => { setSnapText(''); store.setSnapDir(''); } }));
   children.push(h(Field, { key: 'bk-status', label: 'Backup status', description: backupStatus(bk) }));
   if (bk && bk.restored_from) children.push(h(Field, { key: 'bk-restored', label: 'Restored at start-up', description: `Notes were recovered from ${bk.restored_from} because the main file was missing or damaged.` }));
   if (store.backupMsg) children.push(h(Field, { key: 'bk-msg', label: store.backupMsg }));
   children.push(action({ key: 'bk-now', label: 'Back up now', onClick: () => store.backupNow() }));
   children.push(restoreRow('bk-restore', 'latest', 'Restore notes and settings from the backup copy', 'Click again to replace your notes with the backup copy'));
-  children.push(restoreRow('bk-prev', 'previous', 'Undo: restore the latest snapshot from an earlier day', 'Click again to restore the earlier snapshot'));
+  children.push(restoreRow('bk-prev', 'previous', 'Undo: restore the latest backup from an earlier day', 'Click again to restore the earlier backup'));
 
   // Add a note by id
   children.push(h(Field, { key: 'add-kind', label: 'Add a note', description: 'Pick what the note is about, then enter its id.' },

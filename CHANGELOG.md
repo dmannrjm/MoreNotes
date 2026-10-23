@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.3.0
+- Settings wording: the backup path input placeholder now reads "Default file path (<default folder>/MoreNotes_notes.json)".
+
+## 2.2.0
+- **"Snapshot" is now "backup" everywhere**: the second input is "Default backup folder path (...)" with "Use this backup folder" / "Use the default backup folder", messages say "backup", the undo button says "restore the latest backup from an earlier day", and the weekday files are now named `MoreNotes_backup_0.json` ... `MoreNotes_backup_6.json`.
+- Files named `MoreNotes_snapshot_N.json` by earlier versions are still found for recovery and are carried into the new names when a folder changes, so nothing is lost.
+
+## 2.1.0
+- **One input for the second copy**: the folder input and the file input are now a single input. A path ending in `.json` is used as the backup file itself; any other path is used as a folder (the copy is `MoreNotes_notes.json` inside it). Buttons: "Use this path" / "Use the default path". Placeholder: "Default backup file path (...)".
+- **Separate snapshot folder**: a second input sets a different, customisable folder for the weekday snapshots (backups of the main file), independent of where the second copy goes. Buttons: "Use this snapshot folder" / "Use the default snapshot folder". Blank means the snapshots stay next to the copy. Earlier days' snapshots are carried to the new folder when it changes, and recovery reads from it.
+- A chosen file no longer overrides anything: the copy location and the snapshot folder are set separately.
+
+## 2.0.0
+- **Backup file path**: a second input in Automatic backup lets you type the exact file the second copy is written to (a full path ending in `.json`), with "Use this file" and "Use the default file" buttons, the same way as the folder path. The weekday snapshots and `Notes.txt` are written to the folder that file is in. A chosen file takes priority over a chosen folder; clearing it goes back to the folder (or the default `Documents/MoreNotes`).
+- A file path is refused if it is not a `.json` name, or if it would collide with the snapshot files or the main notes file. The status line shows the file in use, and recovery also reads your chosen file.
+
 ## 1.9.0
 - **Linux and Mac fix**: saving a note failed with `write_failed: ~/.local/share/config/MoreNotes_notes.json.tmp: No such file or directory`. The plugin worked out Steam's folder from Millennium's own path, which only holds on Windows (on Linux Millennium lives in `~/.local/share/millennium`, not inside Steam). It now asks Millennium for Steam's path, also tries the usual Linux locations (`~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, the Flatpak install) and the Mac one, and only accepts a folder that really has `config/config.vdf` in it.
 - If Steam's `config` folder is missing, it is created on the first save instead of failing.

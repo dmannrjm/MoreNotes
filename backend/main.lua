@@ -227,7 +227,7 @@ local notes = {}
 local loaded = false
 local ready_called = false
 local restored_from = nil
-local backup_state = { dir = nil, error = nil }
+local backup_state = { dir = nil, snapdir = nil, error = nil }
 
 local function trim(s)
   local r = s:gsub("^%s+", "")
@@ -246,7 +246,7 @@ local function safe_path(p)
 end
 
 -- Appearance + backup settings.
-local DEFAULTS = { pill = true, facing = "right", vertical = 50, shape = "pill", size = "medium", color = "#1a9fff", inline = false, backup = true, backupdir = "", iconcolor = "auto", libtab = false, libdock = true }
+local DEFAULTS = { pill = true, facing = "right", vertical = 50, shape = "pill", size = "medium", color = "#1a9fff", inline = false, backup = true, backupdir = "", backupfile = "", snapdir = "", iconcolor = "auto", libtab = false, libdock = true }
 local ENUMS = {
   facing = { left = true, right = true, top = true, bottom = true, topleft = true, topright = true, bottomleft = true, bottomright = true, addressbar = true },
   shape = { pill = true, circle = true, square = true, tab = true },
@@ -283,6 +283,27 @@ local function apply_settings(a)
   local v = tonumber(a.vertical)
   if v then settings.vertical = math.max(0, math.min(100, math.floor(v + 0.5))) end
   if type(a.color) == "string" and a.color:match("^#%x%x%x%x%x%x$") then settings.color = a.color:lower() end
+  if type(a.backupfile) == "string" then
+    local f = trim(a.backupfile)
+    if f == "" then
+      settings.backupfile = ""
+    elseif safe_path(f) then
+      local n = normalise(f)
+      local base = n:match("([^/]+)$") or ""
+      -- must be a .json file name that cannot collide with the weekday backups, Notes.txt or the main notes file
+      if base:lower():match("%.json$") and not base:match("^MoreNotes_backup_%d%.json$") and not base:match("^MoreNotes_snapshot_%d%.json$") and n ~= NOTES_PATH then
+        settings.backupfile = n
+      end
+    end
+  end
+  if type(a.snapdir) == "string" then
+    local d = trim(a.snapdir)
+    if d == "" then
+      settings.snapdir = ""
+    elseif safe_path(d) then
+      settings.snapdir = (normalise(d):gsub("/+$", ""))
+    end
+  end
   if type(a.backupdir) == "string" then
     local d = trim(a.backupdir)
     if d == "" then
@@ -343,7 +364,7 @@ local function snapshot_doc()
 end
 
 ---------------------------------------------------------------------------
--- External backup (a second copy outside Steam, plus a rolling weekly snapshot)
+-- External backup (a second copy outside Steam, plus a rolling set of weekday backups)
 ---------------------------------------------------------------------------
 local k32 = nil -- nil = not tried, false = unavailable
 
@@ -385,7 +406,7 @@ make_dirs = function(dir)
 end
 
 -- The default folder (all systems): <Documents>/MoreNotes, i.e. %USERPROFILE%\Documents\MoreNotes on Windows and
--- $HOME/Documents/MoreNotes on Linux and Mac. It holds the backup copy, the weekday snapshots and a readable Notes.txt.
+-- $HOME/Documents/MoreNotes on Linux and Mac. It holds the backup copy, the weekday backups and a readable Notes.txt.
 -- Earlier default folders stay as fallbacks (and are searched when recovering), so nothing is lost on update.
 local function home_dir()
   local first, second = os.getenv("USERPROFILE"), os.getenv("HOME")
@@ -412,8 +433,22 @@ local function default_dirs()
   return out
 end
 
--- The folder the user chose (only that one), else the default folders in order.
+local function file_dir(path)
+  return (normalise(path):match("^(.*)/[^/]+$"))
+end
+
+-- The mirror file for a folder: the exact file the user chose, else MoreNotes_notes.json in that folder.
+local function mirror_path(d)
+  if settings.backupfile and #settings.backupfile > 0 then return settings.backupfile end
+  return d .. "/MoreNotes_notes.json"
+end
+
+-- The folder of the file the user chose, else the folder the user chose, else the default folders in order.
 local function candidate_dirs()
+  if settings.backupfile and #settings.backupfile > 0 then
+    local d = file_dir(settings.backupfile)
+    if d and #d > 0 then return { d } end
+  end
   if settings.backupdir and #settings.backupdir > 0 then return { settings.backupdir } end
   return default_dirs()
 end
@@ -421,6 +456,8 @@ end
 local function all_known_dirs()
   local out, seen = {}, {}
   local function add(d) if d and not seen[d] then seen[d] = true; out[#out + 1] = d end end
+  if settings.snapdir and #settings.snapdir > 0 then add(settings.snapdir) end
+  if settings.backupfile and #settings.backupfile > 0 then add(file_dir(settings.backupfile)) end
   if settings.backupdir and #settings.backupdir > 0 then add(settings.backupdir) end
   for _, d in ipairs(default_dirs()) do add(d) end
   return out
@@ -478,7 +515,7 @@ local function backup_write(content, force)
   if not settings.backup and not force then return nil end
   local last_err = "no backup folder available"
   for _, d in ipairs(candidate_dirs()) do
-    local path = d .. "/MoreNotes_notes.json"
+    local path = mirror_path(d)
     local ok, err = write_atomic(path, content)
     if not ok then
       make_dirs(d)
@@ -486,9 +523,15 @@ local function backup_write(content, force)
     end
     if ok then
       backup_state.dir, backup_state.error = d, nil
-      -- One snapshot file per weekday, rewritten on every save: today's file tracks today, the other six keep
+      -- One backup file per weekday, rewritten on every save: today's file tracks today, the other six keep
       -- the last state of the previous days, so a bad edit can be undone up to a week later.
-      write_atomic(d .. "/MoreNotes_snapshot_" .. os.date("%w") .. ".json", content)
+      local sd = d
+      if settings.snapdir and #settings.snapdir > 0 then
+        sd = settings.snapdir
+        make_dirs(sd)
+      end
+      backup_state.snapdir = sd
+      write_atomic(sd .. "/MoreNotes_backup_" .. os.date("%w") .. ".json", content)
       return true
     end
     last_err = tostring(err)
@@ -498,35 +541,51 @@ local function backup_write(content, force)
   return false
 end
 
--- When the folder changes, bring the earlier days' snapshots along so Undo history is not lost
--- (a snapshot already in the new folder is only replaced by a newer one).
+-- When the folder changes, bring the earlier days' backups along so Undo history is not lost
+-- (a backup already in the new folder is only replaced by a newer one). Files from versions before 2.2.0
+-- were named MoreNotes_snapshot_N.json; they are read too and carried over under the new name.
 local function carry_over(from, to)
   for i = 0, 6 do
-    local name = "/MoreNotes_snapshot_" .. i .. ".json"
-    local f = io.open(from .. name, "rb")
-    if f then
-      local raw = f:read("*a")
-      f:close()
-      local ok, src = pcall(decode, raw or "")
-      if ok and type(src) == "table" and type(src.notes) == "table" then
-        local dst = read_doc(to .. name)
-        if not dst or (tonumber(src.saved_at) or 0) > (tonumber(dst.saved_at) or 0) then
-          write_atomic(to .. name, raw)
+    local dst_name = "/MoreNotes_backup_" .. i .. ".json"
+    local best_raw, best_t = nil, -1
+    for _, name in ipairs({ "/MoreNotes_backup_" .. i .. ".json", "/MoreNotes_snapshot_" .. i .. ".json" }) do
+      local f = io.open(from .. name, "rb")
+      if f then
+        local raw = f:read("*a")
+        f:close()
+        local ok, src = pcall(decode, raw or "")
+        if ok and type(src) == "table" and type(src.notes) == "table" then
+          local t = tonumber(src.saved_at) or 0
+          if t > best_t then best_raw, best_t = raw, t end
         end
+      end
+    end
+    if best_raw then
+      local dst = read_doc(to .. dst_name)
+      if not dst or best_t > (tonumber(dst.saved_at) or 0) then
+        write_atomic(to .. dst_name, best_raw)
       end
     end
   end
 end
 
--- The newest valid copy among the mirror and the weekly snapshots of every known folder. With mode "previous"
--- only snapshots saved before today count (an undo for a bad edit made today).
+-- The newest valid copy among the mirror and the weekday backups of every known folder. With mode "previous"
+-- only backups saved before today count (an undo for a bad edit made today).
 local function find_backup(mode)
   local today = os.date("%Y-%m-%d")
   local best, best_path, best_time = nil, nil, -1
   for _, d in ipairs(all_known_dirs()) do
     local files = {}
-    if mode ~= "previous" then files[1] = d .. "/MoreNotes_notes.json" end
-    for i = 0, 6 do files[#files + 1] = d .. "/MoreNotes_snapshot_" .. i .. ".json" end
+    if mode ~= "previous" then
+      files[1] = d .. "/MoreNotes_notes.json"
+      if settings.backupfile and #settings.backupfile > 0 and file_dir(settings.backupfile) == d then
+        files[2] = settings.backupfile
+      end
+    end
+    for i = 0, 6 do
+      files[#files + 1] = d .. "/MoreNotes_backup_" .. i .. ".json"
+      files[#files + 1] = d .. "/MoreNotes_snapshot_" .. i .. ".json" -- named this way before 2.2.0
+    end
     for _, path in ipairs(files) do
       local doc = read_doc(path)
       if doc then
@@ -626,14 +685,16 @@ local function backup_info_table()
   local dir = backup_state.dir or candidate_dirs()[1]
   local saved_at, count = 0, 0
   if dir then
-    local d = read_doc(dir .. "/MoreNotes_notes.json")
+    local d = read_doc(mirror_path(dir))
     if d then
       saved_at = tonumber(d.saved_at) or 0
       for _ in pairs(d.notes) do count = count + 1 end
     end
   end
   return {
-    ok = true, enabled = settings.backup, dir = dir or "", saved_at = saved_at, count = count,
+    ok = true, enabled = settings.backup, dir = dir or "", file = dir and mirror_path(dir) or "",
+    snap_dir = (settings.snapdir and #settings.snapdir > 0) and settings.snapdir or (dir or ""),
+    default_file = (default_dirs()[1] or "") .. "/MoreNotes_notes.json", saved_at = saved_at, count = count,
     error = backup_state.error or "", restored_from = restored_from or "", default_dir = default_dirs()[1] or "",
   }
 end
@@ -654,11 +715,16 @@ end
 function set_settings(args)
   ensure_loaded()
   local previous_dir = backup_state.dir
+  local previous_snap = backup_state.snapdir or previous_dir
   apply_settings(parse_args(args))
   local ok, err = save_notes()
   if not ok then return encode({ ok = false, error = "write_failed", detail = err }) end
   if previous_dir and backup_state.dir and previous_dir ~= backup_state.dir then
     pcall(carry_over, previous_dir, backup_state.dir)
+  end
+  -- the backup folder changed: bring the earlier days along
+  if previous_snap and backup_state.snapdir and previous_snap ~= backup_state.snapdir then
+    pcall(carry_over, previous_snap, backup_state.snapdir)
   end
   return encode({ ok = true, settings = settings })
 end
@@ -745,10 +811,10 @@ function restore_backup(args)
   local b, path = find_backup(mode)
   if not b then return encode({ ok = false, error = (mode == "previous") and "no_previous" or "no_backup" }) end
   pcall(write_atomic, NOTES_PATH .. ".before-restore", snapshot_doc()) -- keep what is being replaced
-  local keep_dir, keep_on = settings.backupdir, settings.backup
+  local keep_dir, keep_file, keep_snap, keep_on = settings.backupdir, settings.backupfile, settings.snapdir, settings.backup
   notes = b.notes
   apply_settings(b.settings)
-  settings.backupdir, settings.backup = keep_dir, keep_on
+  settings.backupdir, settings.backupfile, settings.snapdir, settings.backup = keep_dir, keep_file, keep_snap, keep_on
   local ok, err = save_notes()
   if not ok then return encode({ ok = false, error = "write_failed", detail = err }) end
   return encode({ ok = true, count = count_notes(), from = path })
@@ -763,10 +829,10 @@ function on_load()
   pcall(ensure_default_folder)
   pcall(backup_write, snapshot_doc()) -- first copy, or a refresh after an update
   pcall(write_text_export)
-  -- bring snapshots from the 1.3-1.6 default folder into the new default so Undo history is kept
+  -- bring backups from the 1.3-1.6 default folder into the new default so Undo history is kept
   pcall(function()
     local dirs = default_dirs()
-    if dirs[1] and (not settings.backupdir or #settings.backupdir == 0) then
+    if dirs[1] and (not settings.backupdir or #settings.backupdir == 0) and (not settings.backupfile or #settings.backupfile == 0) and (not settings.snapdir or #settings.snapdir == 0) then
       for i = 2, #dirs do carry_over(dirs[i], dirs[1]) end
     end
   end)

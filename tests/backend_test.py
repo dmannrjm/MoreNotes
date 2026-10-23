@@ -57,7 +57,7 @@ def check(name, cond):
     print(('ok   - ' if cond else 'FAIL - ') + name)
     if not cond: failures.append(name)
 
-DEFAULTS = {'pill': True, 'facing': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': False, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False, 'libdock': True}
+DEFAULTS = {'pill': True, 'facing': 'right', 'vertical': 50, 'shape': 'pill', 'size': 'medium', 'color': '#1a9fff', 'inline': False, 'backup': True, 'backupdir': '', 'backupfile': '', 'snapdir': '', 'iconcolor': 'auto', 'libtab': False, 'libdock': True}
 
 fresh()
 L = Lua()
@@ -72,7 +72,7 @@ check('get_info reports the config path', L.call('get_info')['path'] == '/tmp/st
 # ---- the call that crashed Steam: settings, delivered as one JSON string
 payload = json.dumps({'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#E0589B', 'inline': True})
 r = L.call('set_settings', '{ json = %s }' % lua_str(payload))
-check('set_settings accepts one JSON string and returns the settings', r['ok'] and r['settings'] == {'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#e0589b', 'inline': True, 'backup': True, 'backupdir': '', 'iconcolor': 'auto', 'libtab': False, 'libdock': True})
+check('set_settings accepts one JSON string and returns the settings', r['ok'] and r['settings'] == {'pill': False, 'facing': 'left', 'vertical': 30, 'shape': 'circle', 'size': 'large', 'color': '#e0589b', 'inline': True, 'backup': True, 'backupdir': '', 'backupfile': '', 'snapdir': '', 'iconcolor': 'auto', 'libtab': False, 'libdock': True})
 check('settings are written to disk', json.loads(NOTES.read_text())['settings']['facing'] == 'left')
 L.close(); L = Lua()
 check('settings survive a restart', L.call('get_all')['settings']['shape'] == 'circle' and L.call('get_settings')['settings']['color'] == '#e0589b')
@@ -174,8 +174,8 @@ L.run('on_load() return ""')
 check('first load writes an external copy', (BK / 'MoreNotes_notes.json').exists() and mirror_doc()['settings']['facing'] == 'right' and mirror_doc()['saved_at'] > 0)
 L.call('set_note', '{ key = "app:1", text = "one", label = "Game one" }')
 check('every note change updates the external copy', mirror_doc()['notes']['app:1']['text'] == 'one')
-check('a weekly snapshot is kept (one file per weekday, never more than seven)', (BK / ('MoreNotes_snapshot_%s.json' % time.strftime('%w'))).exists())
-check('today\'s snapshot tracks every save', mirror_doc_path(BK / ('MoreNotes_snapshot_%s.json' % time.strftime('%w')))['notes']['app:1']['text'] == 'one')
+check('a weekly snapshot is kept (one file per weekday, never more than seven)', (BK / ('MoreNotes_backup_%s.json' % time.strftime('%w'))).exists())
+check('today\'s snapshot tracks every save', mirror_doc_path(BK / ('MoreNotes_backup_%s.json' % time.strftime('%w')))['notes']['app:1']['text'] == 'one')
 L.call('set_settings', '{ json = %s }' % lua_str('{"facing":"left"}'))
 check('settings changes are copied too', mirror_doc()['settings']['facing'] == 'left')
 info = L.call('backup_info')
@@ -220,10 +220,10 @@ L.call('set_settings', '{ json = %s }' % lua_str('{"backup":true}'))
 check('"previous" finds nothing when every snapshot is from today', L.call('restore_backup', '{ which = "previous" }')['error'] == 'no_previous')
 other = '0' if time.strftime('%w') != '0' else '1'
 old_doc = {'version': 1, 'saved_at': int(time.time()) - 3 * 86400, 'notes': {'app:old': {'text': 'from three days ago', 'updated': 1}}, 'settings': {'side': 'right'}}
-(BK / ('MoreNotes_snapshot_%s.json' % other)).write_text(json.dumps(old_doc))
+(BK / ('MoreNotes_backup_%s.json' % other)).write_text(json.dumps(old_doc))
 r = L.call('restore_backup', '{ which = "previous" }')
 check('"previous" restores the newest snapshot from an earlier day', r['ok'] and list(L.call('get_all')['notes']) == ['app:old'])
-(BK / ('MoreNotes_snapshot_%s.json' % other)).unlink()
+(BK / ('MoreNotes_backup_%s.json' % other)).unlink()
 L.call('set_note', '{ key = "app:1", text = "one" }')
 L.call('set_note', '{ key = "app:2", text = "two" }')
 
@@ -240,6 +240,40 @@ check('no command injection happened', not Path('/tmp/pwned').exists())
 r = L.call('set_settings', '{ json = %s }' % lua_str('{"backupdir":""}'))
 check('an empty folder goes back to the default', r['settings']['backupdir'] == '' and L.call('backup_info')['dir'] == str(BK))
 
+# custom backup file path
+cfile = '/tmp/steamtest_custom/Chosen Place/my notes.json'
+r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'backupfile': cfile})))
+check('a backup file path is accepted', r['settings']['backupfile'] == cfile)
+L.call('set_note', '{ key = "app:6", text = "six" }')
+check('the copy is written to exactly that file', json.loads(Path(cfile).read_text())['notes']['app:6']['text'] == 'six')
+check('snapshots and Notes.txt go to that file\'s folder', (Path(cfile).parent / 'Notes.txt').exists() and any(p.name.startswith('MoreNotes_backup_') for p in Path(cfile).parent.iterdir()))
+bi = L.call('backup_info')
+check('backup_info reports the chosen file', bi['file'] == cfile and bi['dir'] == str(Path(cfile).parent))
+for bad in ('/tmp/steamtest_custom/x.txt', '/tmp/steamtest_custom/', '/tmp/steamtest_custom/MoreNotes_backup_3.json', '/tmp/steamtest/config/MoreNotes_notes.json', '/tmp/a&b.json', 'relative/file.json', '/tmp/x$(id).json'):
+    r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'backupfile': bad})))
+    check('unsafe or colliding file path rejected: %s' % bad, r['settings']['backupfile'] == cfile)
+L.close(); L = Lua()
+check('the chosen file path survives a restart', L.call('get_settings')['settings']['backupfile'] == cfile)
+r = L.call('set_settings', '{ json = %s }' % lua_str('{"backupfile":""}'))
+check('an empty file path goes back to the folder setting', r['settings']['backupfile'] == '' and L.call('backup_info')['file'].endswith('/MoreNotes_notes.json'))
+
+# separate snapshot folder
+L.call('set_settings', '{ json = %s }' % lua_str('{"backupfile":""}'))
+snapd = '/tmp/steamtest_custom/Backups Here'
+r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'snapdir': snapd + '/'})))
+check('a snapshot folder is accepted (trailing slash removed)', r['settings']['snapdir'] == snapd)
+L.call('set_note', '{ key = "app:9", text = "nine" }')
+today = time.strftime('%w')
+check('the weekday snapshot goes to the snapshot folder, not next to the copy', (Path(snapd) / ('MoreNotes_backup_%s.json' % today)).exists())
+check('the second copy stays where it was', 'app:9' in mirror_doc(Path(custom))['notes'] or 'app:9' in mirror_doc()['notes'])
+check('backup_info reports the snapshot folder', L.call('backup_info')['snap_dir'] == snapd)
+r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'snapdir': '/tmp/a&b'})))
+check('an unsafe snapshot folder is rejected', r['settings']['snapdir'] == snapd)
+L.close(); L = Lua()
+check('the snapshot folder survives a restart', L.call('get_settings')['settings']['snapdir'] == snapd)
+r = L.call('set_settings', '{ json = %s }' % lua_str('{"snapdir":""}'))
+check('an empty snapshot folder goes back to the copy folder', r['settings']['snapdir'] == '' and L.call('backup_info')['snap_dir'] == L.call('backup_info')['dir'])
+
 # unwritable folder never breaks saving
 L.call('set_settings', '{ json = %s }' % lua_str('{"backupdir":"/proc/nope/sub"}'))
 r = L.call('set_note', '{ key = "app:5", text = "five" }')
@@ -248,7 +282,7 @@ check('an unwritable backup folder does not fail the save and is reported', r['o
 L.call('set_settings', '{ json = %s }' % lua_str('{"backupdir":""}'))
 L.call('set_note', '{ key = "app:6", text = "six" }')
 check('recovers once the folder is valid again', L.call('backup_info')['error'] == '' and mirror_doc()['notes']['app:6']['text'] == 'six')
-check('only expected files in the backup folder', sorted(p.name for p in BK.iterdir() if not p.name.startswith('MoreNotes_snapshot_')) == ['MoreNotes_notes.json', 'Notes.txt'])
+check('only expected files in the backup folder', sorted(p.name for p in BK.iterdir() if not p.name.startswith('MoreNotes_backup_')) == ['MoreNotes_notes.json', 'Notes.txt'])
 L.close()
 
 
@@ -284,11 +318,11 @@ L.close()
 # notes written readable, and snapshots from the old default folder are carried into the new one
 fresh()
 BK_OLD.mkdir(parents=True)
-(BK_OLD / 'MoreNotes_snapshot_9.json').write_text('x')
+(BK_OLD / 'MoreNotes_backup_9.json').write_text('x')
 yday = [d for d in range(7) if str(d) != time.strftime('%w')][0]
-(BK_OLD / ('MoreNotes_snapshot_%d.json' % yday)).write_text(json.dumps({'version': 1, 'saved_at': int(time.time()) - 86400, 'notes': {'app:5': {'text': 'old day', 'updated': 1}}, 'settings': {}}))
+(BK_OLD / ('MoreNotes_backup_%d.json' % yday)).write_text(json.dumps({'version': 1, 'saved_at': int(time.time()) - 86400, 'notes': {'app:5': {'text': 'old day', 'updated': 1}}, 'settings': {}}))
 L = Lua(); L.run('on_load() return \"\"')
-check('on load, earlier snapshots from the old default folder are carried into Documents/MoreNotes', (BK / ('MoreNotes_snapshot_%d.json' % yday)).exists())
+check('on load, earlier snapshots from the old default folder are carried into Documents/MoreNotes', (BK / ('MoreNotes_backup_%d.json' % yday)).exists())
 L.call('set_note', '{ key = \"app:1\", text = \"line one\", label = \"Game one\" }')
 txt = (BK / 'Notes.txt').read_text()
 check('Notes.txt lists each note with its label, key and text', 'Game one [app:1]' in txt and 'line one' in txt)
@@ -311,16 +345,16 @@ L = Lua(); L.run('on_load() return ""')
 others = [str(d) for d in range(7) if str(d) != time.strftime('%w')]
 def snap(folder, day, age_days, text):
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / ('MoreNotes_snapshot_%s.json' % day)).write_text(json.dumps({'version': 1, 'saved_at': int(time.time()) - age_days * 86400, 'notes': {'app:' + text: {'text': text, 'updated': 1}}, 'settings': {}}))
+    (folder / ('MoreNotes_backup_%s.json' % day)).write_text(json.dumps({'version': 1, 'saved_at': int(time.time()) - age_days * 86400, 'notes': {'app:' + text: {'text': text, 'updated': 1}}, 'settings': {}}))
 snap(BK, others[0], 1, 'yesterday')
 snap(BK, others[1], 3, 'three-days-ago')
 dest = CUSTOM / 'Moved Here'
 snap(dest, others[0], 5, 'stale-in-destination')
 r = L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'backupdir': str(dest)})))
 check('the folder can be changed while running and a copy is written there at once', r['settings']['backupdir'] == str(dest) and mirror_doc(dest)['settings']['facing'] == 'right')
-check('earlier snapshots come along to the new folder', 'app:three-days-ago' in mirror_doc_path(dest / ('MoreNotes_snapshot_%s.json' % others[1]))['notes'])
-check('a newer snapshot replaces a stale one in the destination', 'app:yesterday' in mirror_doc_path(dest / ('MoreNotes_snapshot_%s.json' % others[0]))['notes'])
-check("today's snapshot in the new folder tracks the current notes", (dest / ('MoreNotes_snapshot_%s.json' % time.strftime('%w'))).exists())
+check('earlier snapshots come along to the new folder', 'app:three-days-ago' in mirror_doc_path(dest / ('MoreNotes_backup_%s.json' % others[1]))['notes'])
+check('a newer snapshot replaces a stale one in the destination', 'app:yesterday' in mirror_doc_path(dest / ('MoreNotes_backup_%s.json' % others[0]))['notes'])
+check("today's snapshot in the new folder tracks the current notes", (dest / ('MoreNotes_backup_%s.json' % time.strftime('%w'))).exists())
 L.call('set_note', '{ key = "app:moved", text = "after the move" }')
 check('later changes go to the new folder only', mirror_doc(dest)['notes']['app:moved']['text'] == 'after the move' and 'app:moved' not in mirror_doc()['notes'])
 r = L.call('set_settings', '{ json = %s }' % lua_str('{"backupdir":""}'))
@@ -385,6 +419,18 @@ LX_BACKEND.parent.mkdir(parents=True); shutil.copy(root / 'backend' / 'main.lua'
 L = Lua(backend=LX_BACKEND, steam_path=str(HOME / '.local' / 'share' / 'Steam'))
 r = L.call('set_note', '{ key = "app:8", text = "needs config folder" }')
 check('a missing config folder is created on save instead of failing with write_failed', r['ok'] and (HOME / '.local' / 'share' / 'Steam' / 'config' / 'MoreNotes_notes.json').exists())
+L.close()
+
+# files named MoreNotes_snapshot_N.json by versions before 2.2.0 are still found and carried over
+fresh()
+BK.mkdir(parents=True)
+old_day = [d for d in range(7) if str(d) != time.strftime('%w')][0]
+(BK / ('MoreNotes_snapshot_%d.json' % old_day)).write_text(json.dumps({'version': 1, 'saved_at': int(time.time()) - 86400, 'notes': {'app:legacy': {'text': 'from an old snapshot file', 'updated': 1}}, 'settings': {}}))
+L = Lua()
+check('a legacy MoreNotes_snapshot_N.json is used for "previous" recovery', L.call('restore_backup', '{ which = "previous" }')['ok'] and 'app:legacy' in L.call('get_all')['notes'])
+dest2 = CUSTOM / 'Carried'
+L.call('set_settings', '{ json = %s }' % lua_str(json.dumps({'snapdir': str(dest2)})))
+check('a legacy snapshot file is carried into the new backup name', (dest2 / ('MoreNotes_backup_%d.json' % old_day)).exists())
 L.close()
 
 print('\n%d failure(s)' % len(failures))

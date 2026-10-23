@@ -68,7 +68,7 @@ const stub = name => { const f = props => React.createElement('div', { ...props,
 // ---- fake backend (mirrors the Lua semantics we rely on) -------------------------------------
 const backendNotes = {};
 let backendSettings = { pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false, libdock: true };
-let backupInfoReply = { ok: true, enabled: true, dir: 'C:/Users/me/Documents/MoreNotes', saved_at: 1760700000, count: 3, error: '', restored_from: '', default_dir: 'C:/Users/me/Documents/MoreNotes' };
+let backupInfoReply = { ok: true, enabled: true, dir: 'C:/Users/me/Documents/MoreNotes', saved_at: 1760700000, count: 3, error: '', restored_from: '', default_dir: 'C:/Users/me/Documents/MoreNotes', default_file: 'C:/Users/me/Documents/MoreNotes/MoreNotes_notes.json', snap_dir: 'C:/Users/me/Documents/MoreNotes' };
 let restoreReply = { ok: true, count: 2, from: 'x' };
 let acceptDir = true;
 let backendDown = false;
@@ -84,7 +84,7 @@ const Millennium = {
     if (fn === 'backup_info') return JSON.stringify(backupInfoReply);
     if (fn === 'backup_now') return JSON.stringify({ ...backupInfoReply, ok: true });
     if (fn === 'restore_backup') return JSON.stringify(restoreReply);
-    if (fn === 'set_settings') { const incoming = JSON.parse(args.json); if ('backupdir' in incoming && !acceptDir) delete incoming.backupdir; backendSettings = { ...backendSettings, ...incoming }; return JSON.stringify({ ok: true, settings: backendSettings }); }
+    if (fn === 'set_settings') { const incoming = JSON.parse(args.json); if ('backupdir' in incoming && !acceptDir) delete incoming.backupdir; if ('backupfile' in incoming && !acceptDir) delete incoming.backupfile; if ('snapdir' in incoming && !acceptDir) delete incoming.snapdir; backendSettings = { ...backendSettings, ...incoming }; return JSON.stringify({ ok: true, settings: backendSettings }); }
     if (fn === 'get_info') return JSON.stringify({ ok: true, path: 'C:/Steam/config/MoreNotes_notes.json', count: Object.keys(backendNotes).length });
     if (fn === 'set_note') {
       if (!/^[\w:.\-\/~]+$/.test(unpacked.key || '')) return JSON.stringify({ ok: false, error: 'bad_key' });
@@ -618,7 +618,7 @@ await test('pill and inline toggles write through', async () => {
 
 await test('backup section lists the toggle, folder, status and actions', () => {
   const t = textOf(tree);
-  for (const l of ['Automatic backup', 'Keep a second copy', 'Backup status', 'Back up now', 'Use this folder']) assert.match(t, new RegExp(l));
+  for (const l of ['Automatic backup', 'Keep a second copy', 'Backup status', 'Back up now', 'Use this path', 'Use this backup folder']) assert.match(t, new RegExp(l));
   assert.match(t, /Last copy .*3 notes, in C:\/Users\/me\/Documents\/MoreNotes/);
   assert.equal(findAll(tree, n => n.host === 'ButtonItem' && /^Restore notes and settings/.test(n.props.label)).length, 1);
 });
@@ -632,22 +632,53 @@ await test('backup toggle writes through as a JSON string', async () => {
   assert.equal(backendSettings.backup, true);
 });
 
-await test('a chosen backup folder is only sent when Use this folder is pressed', async () => {
+await test('a chosen backup folder is only sent when Use this path is pressed', async () => {
   const before = settingsCalls().length;
-  const dirField = () => fields().find(f => f.props.placeholder === 'Default folder path (C:/Users/me/Documents/MoreNotes)');
+  const dirField = () => fields().find(f => String(f.props.placeholder).startsWith('Default file path'));
   dirField().props.onChange({ target: { value: 'D:\\Backups\\Notes' } }); rerender();
   dirField().props.onChange({ target: { value: 'D:\\Backups\\Notes2' } }); rerender();
   await wait(450);
   assert.equal(settingsCalls().length, before, 'typing alone must not create folders');
-  await clickAction('Use this folder');
+  await clickAction('Use this path');
   assert.equal(JSON.parse(settingsCalls().at(-1).args.json).backupdir, 'D:\\Backups\\Notes2');
 });
 
 await test('a rejected folder shows an explanation', async () => {
   acceptDir = false;
-  fields().find(f => f.props.placeholder === 'Default folder path (C:/Users/me/Documents/MoreNotes)').props.onChange({ target: { value: 'C:\\bad&path' } }); rerender();
-  await clickAction('Use this folder');
-  assert.match(textOf(tree), /That folder was not accepted/);
+  fields().find(f => String(f.props.placeholder).startsWith('Default file path')).props.onChange({ target: { value: 'C:\\bad&path' } }); rerender();
+  await clickAction('Use this path');
+  assert.match(textOf(tree), /That path was not accepted/);
+  acceptDir = true;
+});
+
+await test('a path ending in .json is sent as the backup file, anything else as the folder', async () => {
+  const f = () => fields().find(f => String(f.props.placeholder).startsWith('Default file path'));
+  f().props.onChange({ target: { value: 'D:\\Backups\\mine.json' } }); rerender();
+  await clickAction('Use this path');
+  let sent = JSON.parse(settingsCalls().at(-1).args.json);
+  assert.deepEqual([sent.backupfile, sent.backupdir], ['D:\\Backups\\mine.json', '']);
+  f().props.onChange({ target: { value: 'D:\\Backups\\Folder' } }); rerender();
+  await clickAction('Use this path');
+  sent = JSON.parse(settingsCalls().at(-1).args.json);
+  assert.deepEqual([sent.backupfile, sent.backupdir], ['', 'D:\\Backups\\Folder']);
+});
+
+await test('a separate backup folder is only sent when Use this backup folder is pressed', async () => {
+  const before = settingsCalls().length;
+  const f = () => fields().find(f => String(f.props.placeholder).startsWith('Default backup folder path'));
+  assert.ok(f(), 'the backup folder input exists');
+  f().props.onChange({ target: { value: 'E:\\Snaps' } }); rerender();
+  await wait(450);
+  assert.equal(settingsCalls().length, before, 'typing alone must not save anything');
+  await clickAction('Use this backup folder');
+  assert.equal(JSON.parse(settingsCalls().at(-1).args.json).snapdir, 'E:\\Snaps');
+});
+
+await test('a rejected backup folder shows an explanation', async () => {
+  acceptDir = false;
+  fields().find(f => String(f.props.placeholder).startsWith('Default backup folder path')).props.onChange({ target: { value: 'C:\\bad&path' } }); rerender();
+  await clickAction('Use this backup folder');
+  assert.match(textOf(tree), /That backup folder was not accepted/);
   acceptDir = true;
 });
 
@@ -672,12 +703,12 @@ await test('restore needs a second click, then reloads the notes', async () => {
   assert.match(textOf(tree), /Restored 2 notes\./);
 });
 
-await test('undo restore asks for the earlier snapshot and explains when there is none', async () => {
+await test('undo restore asks for the earlier backup and explains when there is none', async () => {
   restoreReply = { ok: false, error: 'no_previous' };
-  await clickAction('Undo: restore the latest snapshot from an earlier day');
-  await clickAction('Click again to restore the earlier snapshot');
+  await clickAction('Undo: restore the latest backup from an earlier day');
+  await clickAction('Click again to restore the earlier backup');
   assert.equal(JSON.parse(calls.filter(c => c.fn === 'restore_backup').at(-1).args.json).which, 'previous');
-  assert.match(textOf(tree), /No snapshot from an earlier day was found\./);
+  assert.match(textOf(tree), /No backup from an earlier day was found\./);
   restoreReply = { ok: true, count: 2, from: 'x' };
 });
 
@@ -706,7 +737,7 @@ await test('invalid values from the backend are ignored on load', async () => {
   backendSettings = { pill: 'yes', facing: 'sideways', side: 'top', vertical: 'abc', shape: 'star', size: 'huge', color: 'red', inline: 1, iconcolor: 'rainbow', libtab: 'no', libdock: 'maybe' };
   await window.__moreNotes.store.load();
   const st = window.__moreNotes.store.settings;
-  assert.equal(JSON.stringify(st), JSON.stringify({ pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', iconcolor: 'auto', libtab: false, libdock: true }));
+  assert.equal(JSON.stringify(st), JSON.stringify({ pill: true, facing: 'right', vertical: 50, shape: 'pill', size: 'medium', color: '#1a9fff', inline: false, backup: true, backupdir: '', backupfile: '', snapdir: '', iconcolor: 'auto', libtab: false, libdock: true }));
 });
 
 await test('settings write failure shows a message', async () => {
