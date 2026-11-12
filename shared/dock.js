@@ -2,8 +2,12 @@
 // One implementation shared by the web-page script (store/community pages) and the Library overlay in the client.
 // It lives in a shadow root so the host page's CSS cannot restyle it.
 //
+<<<<<<< HEAD
 // env: { id, doc, parent?, insets()?, settings(), saved(key) -> string, save(key, text, label, cb(result)) }
 // insets() -> { top, right, bottom, left } in px: the part of the window the tab must stay out of (title bar, bottom bar...).
+=======
+// env: { id, doc, parent?, settings(), saved(key) -> string, save(key, text, label, cb(result)) }
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 // returns: { show({key, label}), hide(), refresh(), isOpen(), host() }
 function createDock(env) {
   var doc = env.doc;
@@ -25,6 +29,7 @@ function createDock(env) {
     ':host{all:initial}',
     '.wrap{position:fixed;z-index:2147483000;font:12px/1.4 "Motiva Sans",Arial,Helvetica,sans-serif;color:#c6d4df}',
     // left / right edges: the box opens beside the handle
+<<<<<<< HEAD
     '.wrap[data-edge=v]{display:flex;align-items:center;top:calc(var(--it,0px) + (100% - var(--it,0px) - var(--ib,0px)) * var(--pf,.5));transform:translateY(-50%)}',
     '.wrap[data-facing=right]{right:var(--ir,0px);flex-direction:row-reverse}',
     '.wrap[data-facing=left]{left:var(--il,0px);flex-direction:row}',
@@ -36,6 +41,19 @@ function createDock(env) {
     // corners: the box opens inward from the corner
     '.wrap[data-facing=topleft]{top:var(--it,0px);left:var(--il,0px)}.wrap[data-facing=topright]{top:var(--it,0px);right:var(--ir,0px)}',
     '.wrap[data-facing=bottomleft]{bottom:var(--ib,0px);left:var(--il,0px)}.wrap[data-facing=bottomright]{bottom:var(--ib,0px);right:var(--ir,0px)}',
+=======
+    '.wrap[data-edge=v]{display:flex;align-items:center;top:var(--pos);transform:translateY(-50%)}',
+    '.wrap[data-facing=right]{right:0;flex-direction:row-reverse}',
+    '.wrap[data-facing=left]{left:0;flex-direction:row}',
+    // top / bottom edges: the box opens below or above the handle
+    '.wrap[data-edge=h]{left:var(--pos);transform:translateX(-50%)}',
+    '.wrap[data-facing=top]{top:0}.wrap[data-facing=bottom]{bottom:0}',
+    '.wrap[data-edge=h] .panel{position:absolute;left:50%;margin:0;transform:translateX(calc(-1 * var(--pos)))}',
+    '.wrap[data-facing=top] .panel{top:100%;margin-top:6px}.wrap[data-facing=bottom] .panel{bottom:100%;margin-bottom:6px}',
+    // corners: the box opens inward from the corner
+    '.wrap[data-facing=topleft]{top:0;left:0}.wrap[data-facing=topright]{top:0;right:0}',
+    '.wrap[data-facing=bottomleft]{bottom:0;left:0}.wrap[data-facing=bottomright]{bottom:0;right:0}',
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
     '.wrap[data-edge=c] .panel{position:absolute;margin:0}',
     '.wrap[data-facing=topleft] .panel{top:100%;left:0;margin:6px 0 0 6px}.wrap[data-facing=topright] .panel{top:100%;right:0;margin:6px 6px 0 0}',
     '.wrap[data-facing=bottomleft] .panel{bottom:100%;left:0;margin:0 0 6px 6px}.wrap[data-facing=bottomright] .panel{bottom:100%;right:0;margin:0 6px 6px 0}',
@@ -138,6 +156,7 @@ function createDock(env) {
     w.setAttribute('data-edge', edge);
     w.setAttribute('data-shape', settings.shape);
     w.style.setProperty('--pos', pos + '%');
+<<<<<<< HEAD
     w.style.setProperty('--pf', String(pos / 100));
     var ins = null;
     try { ins = env.insets ? env.insets() : null; } catch (e) { ins = null; }
@@ -145,6 +164,8 @@ function createDock(env) {
       var v = ins && typeof ins[side] === 'number' && isFinite(ins[side]) ? Math.max(0, Math.round(ins[side])) : 0;
       w.style.setProperty('--i' + side.charAt(0), v + 'px');
     });
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
     w.style.setProperty('--cs', sz.c + 'px');
     w.style.setProperty('--c', settings.color);
     w.style.setProperty('--fg', settings.iconcolor === 'light' ? '#ffffff' : settings.iconcolor === 'dark' ? '#101820' : contrastColor(settings.color));

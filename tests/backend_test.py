@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 """Runs backend/main.lua + backend/rpc_functions.lua under a real Lua interpreter (liblua5.4 via ctypes) with stubbed `millennium`/`logger` modules.
+=======
+"""Runs backend/main.lua under a real Lua interpreter (liblua5.4 via ctypes) with stubbed `millennium`/`logger` modules.
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 The host is LuaJIT, not Lua 5.4, and the real Millennium argument/return plumbing is not reproduced; this checks the
 backend's own logic (JSON codec, settings validation, storage), not how Steam calls it."""
 import ctypes, json, os, shutil, sys, time
@@ -29,11 +33,17 @@ class Lua:
     def __init__(self, backend=None, steam_path='/tmp/steamtest'):
         self.L = lib.luaL_newstate(); lib.luaL_openlibs(self.L)
         self.run("""
+<<<<<<< HEAD
           package.preload['millennium'] = function() return { ready = function() READY = (READY or 0) + 1 end, version = function() return '3.5.0' end, steam_path = function() return '%s' end } end
           package.preload['logger'] = function() return { info = function(self, m) end, error = function(self, m) ERRORS = (ERRORS or '') .. tostring(m) .. ';' end } end
           package.path = '%s/?.lua;' .. package.path
           local entry = dofile('%s')
           on_load, on_unload, on_frontend_loaded = entry.on_load, entry.on_unload, entry.on_frontend_loaded""" % (steam_path, str(Path(backend or BACKEND).parent), backend or BACKEND))
+=======
+          package.preload['millennium'] = function() return { ready = function() READY = (READY or 0) + 1 end, steam_path = function() return '%s' end } end
+          package.preload['logger'] = function() return { info = function(self, m) end } end
+          dofile('%s')""" % (steam_path, backend or BACKEND))
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
     def run(self, code):
         if lib.luaL_loadstring(self.L, ('return (function() ' + code + ' end)()').encode()) != 0:
             msg = lib.lua_tolstring(self.L, -1, None); raise RuntimeError('load: ' + msg.decode())
@@ -45,10 +55,13 @@ class Lua:
         return json.loads(self.run('return %s(%s)' % (fn, lua_args)))
     def close(self): lib.lua_close(self.L)
 
+<<<<<<< HEAD
 def copy_backend(dest):  # main.lua (lifecycle) + rpc_functions.lua (the ---@ffi functions), as in the Starlight project
     for name in ('main.lua', 'rpc_functions.lua'):
         shutil.copy(root / 'backend' / name, Path(dest) / name)
 
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 def lua_str(s):  # a Lua long-string literal for arbitrary text
     return '[==[' + s + ']==]'
 
@@ -56,7 +69,11 @@ def fresh():
     for d in (STEAM, HOME, APPD, CUSTOM):
         if d.exists(): shutil.rmtree(d)
     BACKEND.parent.mkdir(parents=True); (STEAM / 'config').mkdir()
+<<<<<<< HEAD
     copy_backend(BACKEND.parent)
+=======
+    shutil.copy(root / 'backend' / 'main.lua', BACKEND)
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 
 failures = []
 def check(name, cond):
@@ -106,8 +123,13 @@ check('page keys with / and ~ are accepted', L.call('set_note', '{ key = "page:s
 for bad_key in ('', 'has space', 'bad!key', 'x' * 121, 'quote"d'):
     check('bad key rejected: %r' % bad_key[:20], L.call('set_note', '{ key = %s, text = "x" }' % lua_str(bad_key))['error'] == 'bad_key')
 check('missing key rejected', L.call('set_note', '{ text = "x" }')['error'] == 'bad_key')
+<<<<<<< HEAD
 r = L.call('set_note', lua_str(json.dumps({'text': 'secret words'})))
 check('a bad key explains what arrived (a string and its length), without echoing note text', 'detail' in r and 'string(len=' in r['detail'] and 'secret' not in r['detail'])
+=======
+r = L.call('set_note', '{ text = "secret words" }')
+check('a bad key explains what arrived, without echoing note text', 'detail' in r and 'table{' in r['detail'] and 'secret' not in r['detail'])
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 r = L.call('set_note', lua_str('not json at all'))
 check('an undecodable string argument is reported with its length', r['error'] == 'bad_key' and 'string(len=15)' in r['detail'])
 
@@ -115,7 +137,11 @@ check('an undecodable string argument is reported with its length', r['error'] =
 packed = json.dumps({'key': 'app:900', 'text': 'packed note', 'label': 'Packed'})
 check('one packed JSON string in a "json" field', L.call('set_note', '{ json = %s }' % lua_str(packed))['ok'] and L.call('get_all')['notes']['app:900']['text'] == 'packed note')
 check('one JSON string as the whole argument', L.call('set_note', lua_str(json.dumps({'key': 'app:901', 'text': 'as string'})))['ok'] and L.call('get_all')['notes']['app:901']['text'] == 'as string')
+<<<<<<< HEAD
 check('one JSON string request (key, text, label), the way the Starlight frontend sends it', L.call('set_note', lua_str(json.dumps({'key': 'app:902', 'text': 'json string', 'label': 'Pos'})))['ok'] and L.call('get_all')['notes']['app:902']['label'] == 'Pos')
+=======
+check('separate positional values (key, text, label)', L.call('set_note', '"app:902", "positional", "Pos"')['ok'] and L.call('get_all')['notes']['app:902']['label'] == 'Pos')
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 check('a table of strings', L.call('set_note', '{ key = "app:903", text = "table" }')['ok'])
 check('delete through a packed argument', L.call('delete_note', '{ json = %s }' % lua_str(json.dumps({'key': 'app:900'})))['ok'] and 'app:900' not in L.call('get_all')['notes'])
 check('delete with just the key as a string', L.call('delete_note', '"app:902"')['ok'] and 'app:902' not in L.call('get_all')['notes'])
@@ -406,7 +432,11 @@ L.close()
 # ---- Linux/Mac layout: Millennium lives in ~/.local/share/millennium, Steam in ~/.local/share/Steam
 fresh()
 LX_BACKEND = HOME / '.local' / 'share' / 'millennium' / 'plugins' / 'MoreNotes' / 'backend' / 'main.lua'
+<<<<<<< HEAD
 LX_BACKEND.parent.mkdir(parents=True); copy_backend(LX_BACKEND.parent)
+=======
+LX_BACKEND.parent.mkdir(parents=True); shutil.copy(root / 'backend' / 'main.lua', LX_BACKEND)
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 LX_STEAM = HOME / '.local' / 'share' / 'Steam'
 (LX_STEAM / 'config').mkdir(parents=True); (LX_STEAM / 'config' / 'config.vdf').write_text('"InstallConfigStore" {}')
 L = Lua(backend=LX_BACKEND, steam_path='')
@@ -420,7 +450,11 @@ check('Millennium steam_path is used when it is right', L.call('get_info')['path
 L.close()
 # a Steam folder whose config/ does not exist yet: the folder is created on the first save
 fresh()
+<<<<<<< HEAD
 LX_BACKEND.parent.mkdir(parents=True); copy_backend(LX_BACKEND.parent)
+=======
+LX_BACKEND.parent.mkdir(parents=True); shutil.copy(root / 'backend' / 'main.lua', LX_BACKEND)
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 (HOME / '.local' / 'share' / 'Steam').mkdir(parents=True)
 L = Lua(backend=LX_BACKEND, steam_path=str(HOME / '.local' / 'share' / 'Steam'))
 r = L.call('set_note', '{ key = "app:8", text = "needs config folder" }')

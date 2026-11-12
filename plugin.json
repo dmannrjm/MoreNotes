@@ -2,7 +2,11 @@
   "name": "MoreNotes",
   "common_name": "More Notes",
   "description": "Private Notes for Steam",
+<<<<<<< HEAD
   "version": "2.6.0",
+=======
+  "version": "2.3.0",
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
   "author": "your-name",
   "useBackend": true,
   "backendType": "lua"

@@ -1,6 +1,10 @@
 // More Notes frontend (classic packaging). `React` and `API` are provided by the build wrapper.
 const PLUGIN = 'MoreNotes';
+<<<<<<< HEAD
 const VERSION = '2.6.0';
+=======
+const VERSION = '2.3.0';
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 const SHOW_DIAGNOSTICS = true; // @build:diagnostics
 const h = React.createElement;
 
@@ -312,6 +316,7 @@ function mainWindowDoc() {
   } catch (e) { return null; }
 }
 
+<<<<<<< HEAD
 // How far the tab must stay in from each edge of the main window so that it sits inside Steam's content area (below the
 // top bar, above the bottom bar) instead of over the window chrome. Steam draws TopBar, ContentFrame and
 // BottomBarContainer inside OuterFrame; the Library lives in ContentFrame, with the game list (LeftListSizableContainer) on
@@ -337,6 +342,8 @@ function libraryInsets(doc) {
   } catch (e) { return none; }
 }
 
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 // The Library tab: the same docked tab, drawn over the Library window, holding a Library-wide note.
 // Hidden while a web page is showing (the page has its own tab) and when the address-bar option is chosen.
 const libdock = {
@@ -352,15 +359,21 @@ const libdock = {
       if (st.facing === 'addressbar') { this.drop(); return this.setStatus('hidden: the address bar option is selected'); }
       const bar = doc.querySelector('.URLBar');
       if (bar && bar.getBoundingClientRect && bar.getBoundingClientRect().width > 0) { this.drop(); return this.setStatus('hidden: a web page is showing (it has its own tab)'); }
+<<<<<<< HEAD
       // The Library is not on screen (a Millennium or Steam settings window, or another view, is covering it).
       const lib = doc.querySelector('.LocalContentContainer');
       if (lib && lib.getBoundingClientRect && lib.getBoundingClientRect().width <= 0) { this.drop(); return this.setStatus('hidden: the Library is not showing'); }
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
       if (!this.dock || this.doc !== doc) {
         this.drop();
         this.doc = doc;
         this.dock = createDock({
           id: 'morenotes-library-dock', doc,
+<<<<<<< HEAD
           insets: () => libraryInsets(doc),
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
           settings: () => store.settings,
           saved: key => { const n = store.get(key); return (n && n.text) || ''; },
           save: (key, text, label, cb) => { store.save(key, text, label).then(cb); },
@@ -965,12 +978,16 @@ function NotesManager() {
   });
   children.push(h(Field, { key: 'bk-head', label: 'Automatic backup', description: "Your notes and settings are kept in Steam's config folder, outside the plugin, so updating or reinstalling the plugin never touches them. A second copy, updated on every change, with one backup per weekday, in the MoreNotes folder the plugin creates within your Documents folder (or a folder you choose below), along with a readable Notes.txt. If the main file goes missing or is damaged, it is restored from the copy automatically." }));
   children.push(h(Field, { key: 'bk-on', label: 'Keep a second copy' }, h(Toggle, { value: st.backup, onChange: v => { store.saveSettings({ backup: v }); setTimeout(() => store.refreshBackup(), 700); } })));
+<<<<<<< HEAD
   children.push(h(TextField, { key: 'bk-dir', value: shownFolder, placeholder: (bk && bk.default_file) ? 'Default file path (' + bk.default_file + ') or folder path (' + bk.default_dir + ')' : 'Default file path or folder path', onChange: e => setFolderText(e.target.value) }));
   const typedPath = String(shownFolder || '').trim();
   if (typedPath) {
     const asFile = /\.json$/i.test(typedPath) ? typedPath : typedPath.replace(/[\\/]+$/, '') + (/\\/.test(typedPath) && !/\//.test(typedPath) ? '\\' : '/') + 'MoreNotes_notes.json';
     children.push(h(Field, { key: 'bk-preview', label: 'The copy will be saved as', description: asFile }));
   }
+=======
+  children.push(h(TextField, { key: 'bk-dir', value: shownFolder, placeholder: (bk && bk.default_file) ? 'Default file path (' + bk.default_file + ')' : 'Default file path', onChange: e => setFolderText(e.target.value) }));
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
   children.push(action({ key: 'bk-use', label: 'Use this path', onClick: () => store.setBackupPath(shownFolder) }));
   if (st.backupdir || st.backupfile) children.push(action({ key: 'bk-default', label: 'Use the default path', onClick: () => { setFolderText(''); store.setBackupPath(''); } }));
   children.push(h(TextField, { key: 'bk-snap', value: shownSnap, placeholder: (bk && bk.snap_dir) ? 'Default backup folder path (' + bk.snap_dir + ')' : 'Default backup folder path', onChange: e => setSnapText(e.target.value) }));

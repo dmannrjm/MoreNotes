@@ -376,7 +376,11 @@ await test('offset slider is centred on 0, writes once, and moves the tab (negat
   const before = settingsCalls().length;
   const offset = () => sliderByLabel('Up/down offset (all tabs)');
   assert.equal(offset().props.value, 0);
+<<<<<<< HEAD
   assert.equal(offset().props.min, -50); assert.equal(offset().props.max, 50);
+=======
+  assert.equal(offset().props.min, -42); assert.equal(offset().props.max, 42);
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
   for (const v of [-10, -20, -33]) { offset().props.onChange(v); rerender(); }
   await wait(450);
   assert.equal(settingsCalls().length, before + 1);
@@ -663,6 +667,7 @@ await test('a path ending in .json is sent as the backup file, anything else as 
   assert.deepEqual([sent.backupfile, sent.backupdir], ['', 'D:\\Backups\\Folder']);
 });
 
+<<<<<<< HEAD
 await test('the path input accepts a folder too and shows where the copy will be saved', async () => {
   const f = () => fields().find(f => String(f.props.placeholder).startsWith('Default file path'));
   assert.match(f().props.placeholder, /or folder path \(C:\/Users\/me\/Documents\/MoreNotes\)/);
@@ -673,6 +678,8 @@ await test('the path input accepts a folder too and shows where the copy will be
   assert.match(textOf(tree), /E:\/x\/my\.json/);
 });
 
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 await test('a separate backup folder is only sent when Use this backup folder is pressed', async () => {
   const before = settingsCalls().length;
   const f = () => fields().find(f => String(f.props.placeholder).startsWith('Default backup folder path'));
@@ -845,9 +852,15 @@ await test('re-running main disposes the previous instance', async () => {
   assert.equal(stopped, 1);
 });
 
+<<<<<<< HEAD
 await test('the shipped setting hides the diagnostics panel; the test build shows it', async () => {
   const { execFileSync } = await import('node:child_process');
   execFileSync('node', [join(root, 'scripts', 'test-build.mjs'), '--release', '--out', '/tmp/morenotes-release'], { stdio: 'pipe' });
+=======
+await test('the release build hides the diagnostics panel; the dev build shows it', async () => {
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('node', [join(root, 'scripts', 'build.mjs'), '--release', '--out', '/tmp/morenotes-release'], { stdio: 'pipe' });
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
   const releaseCode = readFileSync('/tmp/morenotes-release/index.js', 'utf8');
   assert.match(releaseCode, /const SHOW_DIAGNOSTICS = false;/);
   assert.match(built, /const SHOW_DIAGNOSTICS = true;/);

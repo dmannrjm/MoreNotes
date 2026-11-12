@@ -138,6 +138,7 @@ with sync_playwright() as p:
     check('dispose removes the button and the tab and stops polling', page.locator('#morenotes-urlbtn').count() == 0 and page.locator('#morenotes-library-dock').count() == 0
           and page.evaluate("__moreNotes.urlbar.timer") == 0 and page.evaluate("__moreNotes.libdock.timer") == 0)
     check('only plain strings were sent to the backend', page.evaluate("window.__bad.length") == 0)
+<<<<<<< HEAD
     # ------------------------------------------------------------------ Library tab inside Steam's content area
     # Layout from the Library DOM dump: OuterFrame > TopBar, ContentFrame (> LocalContentContainer, BrowserWrapper), BottomBarContainer
     LAYOUT = """<html><body style="margin:0"><div class="OuterFrame" style="display:flex;flex-direction:column;height:800px;width:1280px">
@@ -225,6 +226,8 @@ with sync_playwright() as p:
     page2.evaluate("document.querySelector('.LocalContentContainer').style.display = 'flex'"); page2.evaluate("__moreNotes.libdock.tick()")
     check('and comes back when the Library shows again', page2.locator('#morenotes-library-dock .handle').count() == 1)
 
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
     check('no page errors' + (' ' + repr(errors[:3]) if errors else ''), not errors)
     page.screenshot(path='/tmp/client_last.png')
     browser.close()

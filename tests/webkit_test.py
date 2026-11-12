@@ -248,15 +248,22 @@ with sync_playwright() as p:
     pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box()
     check('bottom edge: the box opens above the handle', pb['y'] + pb['height'] < b['y'])
     pg.keyboard.press('Escape')
+<<<<<<< HEAD
     for vv in (8, 50, 92):
         look(facing='right', **{**base, 'vertical': vv}); b = handle()
         pg.click('#morenotes-pill .handle'); b2 = handle(); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
         check('a page tab does not move when its box opens (offset %d)' % vv, near(b['y'], b2['y']) and near(b['x'], b2['x']) and pb['y'] >= -0.5 and pb['y'] + pb['height'] <= 800.5)
+=======
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
     look(facing='top', **{**base, 'vertical': 20}); b = handle()
     check('top edge: the offset moves the tab along the edge (20% of the width)', near(b['x'] + b['width'] / 2, 256))
     look(facing='top', **{**base, 'vertical': 0}); b = handle()
     pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
+<<<<<<< HEAD
     check('top edge: at the far end the tab sits flush in the corner and the box stays on screen', near(b['x'], 0) and pb['x'] >= 0)
+=======
+    check('top edge: the offset is held within 8%-92% and the box stays on screen', near(b['x'] + b['width'] / 2, 102.4) and pb['x'] >= 0)
+>>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
     look(facing='bottom', **{**base, 'vertical': 100}); pg.click('#morenotes-pill .handle'); pb = pg.locator('#morenotes-pill .panel').bounding_box(); pg.keyboard.press('Escape')
     check('bottom edge at the far end keeps the box on screen', pb['x'] + pb['width'] <= 1280 and pb['x'] >= 0)
     look(facing='top', **{**base, 'shape': 'tab'}); b = handle()
