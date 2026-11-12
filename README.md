@@ -1,6 +1,4 @@
 <<<<<<< HEAD
-# More Notes (Millennium plugin, Starlight `.star`)
-=======
 # More Notes (Millennium plugin)
 >>>>>>> e72783ec219df1e2a75546f3b0d03a14e6a1573b
 
