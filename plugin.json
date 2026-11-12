@@ -1,0 +1,9 @@
+{
+  "name": "MoreNotes",
+  "common_name": "More Notes",
+  "description": "Private Notes for Steam",
+  "version": "2.6.0",
+  "author": "your-name",
+  "useBackend": true,
+  "backendType": "lua"
+}

@@ -1,0 +1,19 @@
+{
+  "name": "more-notes",
+  "version": "3.0.0",
+  "description": "Millennium (Starlight) plugin: private notes on people and games across Steam pages.",
+  "private": true,
+  "scripts": {
+    "dev": "./node_modules/.bin/starlight watch",
+    "build": "./node_modules/.bin/starlight pack",
+    "prepare": "./node_modules/.bin/starlight lsp",
+    "generate": "node scripts/generate.mjs",
+    "test": "node scripts/generate.mjs --check && node scripts/test-build.mjs && node tests/frontend.test.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "@steambrew/starlight": "^1.1.3"
+  },
+  "license": "MIT"
+}

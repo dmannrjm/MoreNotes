@@ -1,0 +1,42 @@
+[plugin]
+id = "more-notes"
+name = "More Notes"
+version = "3.0.0"
+author = "your-name"
+description = "Private notes on people and games across Steam: store, community, profiles, wishlists and the Library."
+
+[assets]
+# bundled at compile time (read with millennium.assets.read)
+resources = ["resources/**/*"]
+
+[backend]
+entry = "backend/main.lua"
+sources = ["backend/**/*.lua"]
+
+[frontend]
+entry = "frontend/index.tsx"
+
+[webkit]
+entry = "webview/preload.ts"
+
+[compiler]
+# auto = find the Millennium install and put more-notes.star in its plugins folder
+output_path = "auto"
+
+[dev]
+auto_restart = true
+reload_steamui_when = "both"
+
+[inspect]
+depth = 4
+colors = true
+show_hidden = true
+
+[logger]
+padding = 0
+backend_prefix  = "BCK"
+frontend_prefix = "FRT"
+webview_prefix  = "WEB"
+
+[patches]
+debug = false
